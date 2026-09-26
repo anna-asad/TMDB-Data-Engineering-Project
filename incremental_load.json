@@ -1,0 +1,951 @@
+{
+  "pulled_at": "2026-09-26",
+  "trending_today": {
+    "source_endpoint": "/trending/movie/day",
+    "record_count": 20,
+    "results": [
+      {
+        "adult": false,
+        "backdrop_path": "/58D9nalUYW5L5K0guw7hcpsEJBH.jpg",
+        "id": 1492640,
+        "title": "UNABOMBER",
+        "original_title": "UNABOMBER",
+        "overview": "Follow Ted Kaczynski's transformation from Harvard prodigy into the infamous Unabomber. Subjected to controversial psychological experiments by Professor Henry Murray, Kaczynski's troubled past resurfaces decades later when his manhunt, led by FBI agent Joanne Miller, brings to light the chilling consequences of ambition and isolation.",
+        "poster_path": "/39aMkR8Y5vhCG9dTkjiqRl8AVqp.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          53,
+          18,
+          80
+        ],
+        "popularity": 104.4732,
+        "release_date": "2026-09-25",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.357,
+        "vote_count": 35
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/3icyRAqgakNcQn6aDVz9libFmBA.jpg",
+        "id": 1423191,
+        "title": "Resident Evil",
+        "original_title": "Resident Evil",
+        "overview": "Medical courier Bryan unwittingly finds himself fighting for survival as one fateful, horrifying night collapses around him in chaos.",
+        "poster_path": "/i7UyjfPio0VFHB9rBUZSFyhOoM8.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          27,
+          878,
+          12
+        ],
+        "popularity": 483.2515,
+        "release_date": "2026-09-16",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.311,
+        "vote_count": 477
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/o7Oy9Gbx1CCyaweL8xUhtMW4Puq.jpg",
+        "id": 1032863,
+        "title": "The Love Hypothesis",
+        "original_title": "The Love Hypothesis",
+        "overview": "Olive Smith, a biology PhD candidate, and Dr. Adam Carlsen, a hotshot professor and well-known tyrant, enter into a fake relationship, seeing each of their carefully calculated theories on love get thrown into chaos.",
+        "poster_path": "/vfZxVHextAGC70zrNhS8lsROqP1.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          10749,
+          35
+        ],
+        "popularity": 290.0712,
+        "release_date": "2026-09-23",
+        "softcore": false,
+        "video": false,
+        "vote_average": 8.361,
+        "vote_count": 201
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/8giIQcHpxgsPVP6c7aQtHl3txuh.jpg",
+        "id": 1607127,
+        "title": "One Last Shot",
+        "original_title": "One Last Shot",
+        "overview": "Navy Seal Jake Harris must stop a team of mercenaries, led by his disillusioned former comrade, from disabling the US missile defense network.",
+        "poster_path": "/niQ4NBh2jqAf1hDZP5m6ReWFAb7.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          28,
+          53
+        ],
+        "popularity": 154.0015,
+        "release_date": "2026-09-22",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.6,
+        "vote_count": 46
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/qjTqY5coNiz6sVtPng40IzltsoN.jpg",
+        "id": 1084244,
+        "title": "Toy Story 5",
+        "original_title": "Toy Story 5",
+        "overview": "When Bonnie receives a Lilypad tablet as a gift and becomes obsessed, Buzz, Woody, Jessie and the rest of the gang's jobs become exponentially harder when they have to go head to head with the all-new threat to playtime.",
+        "poster_path": "/sfQtVlIHljToOwYjhe21KPGzZWK.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          16,
+          10751,
+          35,
+          12
+        ],
+        "popularity": 174.994,
+        "release_date": "2026-06-17",
+        "softcore": false,
+        "video": false,
+        "vote_average": 8.335,
+        "vote_count": 2314
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/4E5RVsSUG1A4Adwbqupu5w6kofZ.jpg",
+        "id": 1375441,
+        "title": "Primetime",
+        "original_title": "Primetime",
+        "overview": "In 2006, To Catch a Predator host Chris Hansen sets out to make television history, turning an undercover investigation into one of the most controversial cultural phenomena of the decade.",
+        "poster_path": "/lmrulvLbmaejTix1YaMxo1oGhH1.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          18,
+          53
+        ],
+        "popularity": 64.3462,
+        "release_date": "2026-09-23",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.1,
+        "vote_count": 26
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/cNICUho5uiAGkfCAQq1ihyaMla4.jpg",
+        "id": 1465063,
+        "title": "Forgotten Island",
+        "original_title": "Forgotten Island",
+        "overview": "While celebrating their last night together, high school graduates and best friends Jo and Raissa stumble upon a mysterious portal that transports them to the fantastical island of Nakali. When they discover that the memories of their entire friendship are the price for returning home, Jo and Raissa must race to find a way to leave the island before they forget each other forever.",
+        "poster_path": "/Lr0Ng7Gg02RW1AyfYEL6P0WUvd.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          16,
+          12,
+          14,
+          35,
+          10751
+        ],
+        "popularity": 72.6471,
+        "release_date": "2026-09-10",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.737,
+        "vote_count": 19
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/dqmMWNWfLnExDRpMtIMqI97GQFR.jpg",
+        "id": 1083381,
+        "title": "Backrooms",
+        "original_title": "Backrooms",
+        "overview": "A strange doorway appears in the basement of a furniture showroom.",
+        "poster_path": "/rhGx6E3qRNMgj3i5su2oukNHwIQ.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          27,
+          9648,
+          878
+        ],
+        "popularity": 95.227,
+        "release_date": "2026-05-27",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.032,
+        "vote_count": 3424
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/RMXG8myu1aGlNUsRjtxzmpdMK0.jpg",
+        "id": 1368337,
+        "title": "The Odyssey",
+        "original_title": "The Odyssey",
+        "overview": "Odysseus, the legendary King of Ithaca, embarks on a long and perilous journey home following the Trojan War. Throughout his voyage, he is forced to confront the whims of gods, mythological monsters, and trials that stretch both his cunning and his humanity to the breaking point.",
+        "poster_path": "/5rhTDKUhPYvpdQIijFIs5VoWsON.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          12,
+          28,
+          14
+        ],
+        "popularity": 329.039,
+        "release_date": "2026-07-15",
+        "softcore": false,
+        "video": false,
+        "vote_average": 8.019,
+        "vote_count": 3909
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/bicMU6xVD5deVyKP2azpyx7xkmH.jpg",
+        "id": 1263337,
+        "title": "Heart of the Beast",
+        "original_title": "Heart of the Beast",
+        "overview": "After a harrowing plane crash, Special Forces officer James Belmont and his combat dog, Odin, find themselves stranded deep in the Alaskan wilderness. Together, they are forced into a brutal fight for survival against the elements.",
+        "poster_path": "/1ApfSA8JTqeha3GTFEY8syV4auq.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          12,
+          53
+        ],
+        "popularity": 128.778,
+        "release_date": "2026-09-19",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.722,
+        "vote_count": 54
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/rZfmzpixLKLR3Hg2u0WgC7XLFl8.jpg",
+        "id": 1339713,
+        "title": "Obsession",
+        "original_title": "Obsession",
+        "overview": "After breaking the mysterious \"One Wish Willow\" to win his crush's heart, a hopeless romantic finds himself getting exactly what he asked for but soon discovers that some desires come at a dark, sinister price.",
+        "poster_path": "/bRwnj8WEKBCvmfeUNOukJPwB43K.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          27,
+          53
+        ],
+        "popularity": 151.2085,
+        "release_date": "2026-05-13",
+        "softcore": false,
+        "video": false,
+        "vote_average": 8.192,
+        "vote_count": 5727
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/lh3BDkmWJh998n4fQcHYcVi7dpm.jpg",
+        "id": 1284465,
+        "title": "The Death of Robin Hood",
+        "original_title": "The Death of Robin Hood",
+        "overview": "Grappling with his past after a life of crime and murder, Robin Hood finds himself gravely injured after a battle he thought would be his last. In the hands of a mysterious woman, he is offered a chance at salvation.",
+        "poster_path": "/13MmRwmG5NmaMfU8qNrtgGXisiD.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          12,
+          18,
+          28
+        ],
+        "popularity": 67.1417,
+        "release_date": "2026-06-18",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.428,
+        "vote_count": 383
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/qeQJx07rK2xm8SD2sJxFKhE7gs0.jpg",
+        "id": 969681,
+        "title": "Spider-Man: Brand New Day",
+        "original_title": "Spider-Man: Brand New Day",
+        "overview": "Fighting crime full-time as Spider-Man in a world that doesn't remember him\u2014and the pressure of seeing his old friends move on without him\u2014sparks a change in Peter Parker he may not have the power to control. But that transformation might also be the only thing that can stop a shocking new threat to the city and those he loves - a powerful villain no one can even see.",
+        "poster_path": "/bjiS5ipwxb9JFy3XRRN4OAilSeX.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          878,
+          28,
+          12
+        ],
+        "popularity": 630.0457,
+        "release_date": "2026-07-29",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.864,
+        "vote_count": 2877
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/s4v0UX1anfXm0UvloLsTTJ4v222.jpg",
+        "id": 1003596,
+        "title": "Avengers: Doomsday",
+        "original_title": "Avengers: Doomsday",
+        "overview": "Beloved heroes from three distinct universes are set on a deadly collision course and face an existential threat unlike anything they've ever encountered.",
+        "poster_path": "/jzPwsojjFStf5lR5Nm07w2hH56G.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          878,
+          28,
+          12
+        ],
+        "popularity": 66.4849,
+        "release_date": "2026-12-16",
+        "softcore": false,
+        "video": false,
+        "vote_average": 0.0,
+        "vote_count": 0
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/xnGBwwD9QjeQeRKzDEVp0cNAEFe.jpg",
+        "id": 1529372,
+        "title": "Don't Be Shy!",
+        "original_title": "\u0921\u094b\u0902\u091f \u092c\u0940 \u0936\u093e\u092f!",
+        "overview": "Quintessential Mean Girl, Shyamili \u2018Shy\u2019 Das, finds herself suddenly relegated to Loser-ville when Mayank, her boyfriend of three years, suddenly dumps her. But Shy, all set to get her revenge, finds herself falling into friendship and compassion with someone unexpected\u2026 Mayank\u2019s new girlfriend - Tara.",
+        "poster_path": "/lBeDq7KmZaQNnnIXgExCAmfLMqT.jpg",
+        "media_type": "movie",
+        "original_language": "hi",
+        "genre_ids": [
+          10749,
+          35
+        ],
+        "popularity": 8.8828,
+        "release_date": "2026-09-25",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.0,
+        "vote_count": 1
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/u3EtxdmZeiliW98c5Oegk5LIGZa.jpg",
+        "id": 1248832,
+        "title": "Digger",
+        "original_title": "Digger",
+        "overview": "The most powerful man in the world embarks on a frantic mission to prove he is humanity's savior before the disaster he's unleashed destroys everything.",
+        "poster_path": "/1ATXKrIPJyKNwnJ6lcG088Sa6zi.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          18,
+          35
+        ],
+        "popularity": 62.3687,
+        "release_date": "2026-09-30",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.833,
+        "vote_count": 6
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/lneqlgbg3XUjNaeGYk8arhgzczo.jpg",
+        "id": 445466,
+        "title": "Idiots",
+        "original_title": "Idiots",
+        "overview": "Two rock-bottom drivers transport a wealthy teen to rehab, but their simple job spirals into a chaotic journey of drugs, danger, and crime as their passenger derails their plans.",
+        "poster_path": "/flpCqxH46pGZD1kNOdYgrVsDoTm.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          35,
+          80
+        ],
+        "popularity": 50.0062,
+        "release_date": "2026-08-20",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.654,
+        "vote_count": 26
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/rlOz3ZMwtIyvZB9O4btHASVJjI1.jpg",
+        "id": 1384514,
+        "title": "The Vvaan",
+        "original_title": "\u0926 \u0935\u0928",
+        "overview": "A rational urban man defies his ancestral forbidden forest and awakens a divine goddess, only to realise that not only do some powers exist beyond logic but he must rise as the village\u2019s only saviour to protect his people from annihilation.",
+        "poster_path": "/fygsmzrKBGV3O4ky6l26wKF8QBA.jpg",
+        "media_type": "movie",
+        "original_language": "hi",
+        "genre_ids": [
+          28,
+          12,
+          53
+        ],
+        "popularity": 40.2847,
+        "release_date": "2026-09-25",
+        "softcore": false,
+        "video": false,
+        "vote_average": 9.4,
+        "vote_count": 8
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/b9q9VmbXDvJmTziRqkwdEmFdwhr.jpg",
+        "id": 1101383,
+        "title": "The End of Oak Street",
+        "original_title": "The End of Oak Street",
+        "overview": "After a mysterious cosmic event rips Oak Street from suburbia and transports their neighborhood to someplace unknown, the Platt family soon discovers that their very survival depends on them sticking together as they navigate their now unrecognizable surroundings.",
+        "poster_path": "/fYXqpgPmHMphSF2W30GbTeJVIa5.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          878,
+          9648,
+          53
+        ],
+        "popularity": 384.6196,
+        "release_date": "2026-08-12",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.019,
+        "vote_count": 1527
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/c6BPbkO5Npt1OdwttAxCFo06wtH.jpg",
+        "id": 1108427,
+        "title": "Moana",
+        "original_title": "Moana",
+        "overview": "Teenage Moana answers the Ocean's call and, for the first time, voyages beyond the reef of her island of Motunui with infamous demigod Maui on an unforgettable journey to restore prosperity to her people.",
+        "poster_path": "/gaet1xQ2nxrG0V1Ep9T20ZMNEIC.jpg",
+        "media_type": "movie",
+        "original_language": "en",
+        "genre_ids": [
+          10751,
+          14,
+          35,
+          12
+        ],
+        "popularity": 156.3784,
+        "release_date": "2026-07-08",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.396,
+        "vote_count": 773
+      }
+    ]
+  },
+  "changed_ids_today": {
+    "source_endpoint": "/movie/changes",
+    "record_count": 100,
+    "results": [
+      {
+        "id": 1779568,
+        "adult": null,
+        "softcore": null
+      },
+      {
+        "id": 1779569,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 443774,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 297630,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1779507,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 24047,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 947563,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 485013,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1211351,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1775061,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1626060,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1393929,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1628675,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1763031,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1680854,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1689833,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1589238,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1450473,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1492640,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1633618,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1381071,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1703230,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1724818,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1740360,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1757503,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1758525,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1758592,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1763245,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1763957,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1764157,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1766744,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1766745,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1766777,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1766781,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1767055,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1773168,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1774653,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1185539,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1477576,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1651971,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1692501,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1701826,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1766208,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1766439,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1769557,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1776461,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1761087,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778982,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1761034,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778310,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778720,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778724,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778743,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778410,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778746,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778769,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778843,
+        "adult": null,
+        "softcore": null
+      },
+      {
+        "id": 1779547,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1777536,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778506,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778749,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778750,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778751,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778754,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778874,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1779325,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778242,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778343,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778278,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1776522,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778335,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778403,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1747592,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778261,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1754444,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1767363,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1767334,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1777423,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778694,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1779516,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1779535,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778542,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1776645,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778515,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778654,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1599674,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1776687,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778774,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1778323,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1770302,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 161715,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 172786,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 57834,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1375441,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1601704,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1779571,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1113466,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1554346,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 235046,
+        "adult": false,
+        "softcore": false
+      },
+      {
+        "id": 1480090,
+        "adult": false,
+        "softcore": false
+      }
+    ]
+  }
+}
