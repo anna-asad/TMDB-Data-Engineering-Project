@@ -11,7 +11,7 @@ import requests
 API_KEY = os.environ.get("TMDB_API_KEY", "407127911d8fd445afe7b69d21388f10")
 BASE_URL = "https://api.themoviedb.org/3"
 # CONFIG
-YEAR_RANGE = range(2015, 2027)      # inclusive start, exclusive end -> 2015-2026
+YEAR_RANGE = range(2005, 2015)      # inclusive start, exclusive end -> 2015-2026
 MAX_PAGES_PER_YEAR = 500            # TMDB's hard cap per query
 ENRICH_DETAILS = True               # fetch /movie/{id} for richer fields
 ENRICH_LIMIT = 3000                # cap on how many movies get enriched
@@ -121,7 +121,7 @@ def pull_full_load():
         "results": movies_list,
     }
 
-    with open("full_load.json", "w", encoding="utf-8") as f:
+    with open("full_load_2005_2014.json", "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
     size_mb = os.path.getsize("full_load.json") / (1024 * 1024)
