@@ -20,69 +20,99 @@ This project builds a scalable entertainment data lakehouse to analyze global mo
 ## 🏗️ Medallion Architecture
 
 ```
-[ TMDB API ] ──(Raw JSON)──► [ Bronze Layer ] ──(Cleanse / Cast / Dedupe)──► [ Silver Layer ]
-                               (Delta Table)                                   (Delta Lake)
-                                                                            ├── silver.movies
-                                                                            └── silver.movie_genres
+[ TMDB API ] ──(Raw JSON)──► [ Bronze Layer ] ──(Parse / Cleanse / Cast / Dedupe)──► [ Silver Layer ]
+                               workspace.tmdb.bronze_movies                       (Delta Lake)
+                                                                                  ├── workspace.tmdb.silver_movies
+                                                                                  ├── workspace.tmdb.silver_genre_bridge
+                                                                                  └── workspace.tmdb.silver_genres
 ```
+
+All tables live in the **`workspace.tmdb`** Unity Catalog schema. Raw API payloads are staged as JSON files in the **`workspace.tmdb.raw`** UC Volume before Bronze ingestion.
 
 ---
 
 ## 📊 Data Models & Schema Enforcement
 
-### 1. Bronze Layer Model (`bronze.raw_movies`)
-The Bronze layer acts as an immutable landing zone preserving raw API payloads as Delta tables, augmented with ingestion metadata.
+### 1. Bronze Layer Model (`workspace.tmdb.bronze_movies`)
+The Bronze layer acts as an immutable landing zone preserving raw API payloads as Delta tables, augmented with ingestion metadata. Each row stores the **full raw JSON** of a single TMDB movie record in the `raw_record` column, enabling schema evolution without re-pulling from the API.
 
 | Column Name | Data Type | Constraint / PK | Description |
 | :--- | :--- | :--- | :--- |
-| `id` | `INTEGER` | **Primary Key** | Unique TMDB movie identifier |
-| `title` | `STRING` | Nullable | Primary movie title |
-| `release_date` | `STRING` | Nullable | Unparsed release date string (YYYY-MM-DD) |
-| `popularity` | `DOUBLE` | Nullable | TMDB daily popularity metric |
-| `vote_average` | `DOUBLE` | Nullable | Weighted average user rating (0-10) |
-| `vote_count` | `INTEGER` | Nullable | Number of user votes cast |
-| `budget` | `BIGINT` | Nullable | Production budget in USD (0 if unknown) |
-| `revenue` | `DOUBLE` | Nullable | Global box office revenue in USD (0 if unknown) |
-| `runtime` | `INTEGER` | Nullable | Movie runtime in minutes |
-| `genre_ids` | `ARRAY<INT>`| Nullable | Array of raw TMDB numerical genre IDs |
-| `original_language` | `STRING` | Nullable | ISO 639-1 language code |
-| `overview` | `STRING` | Nullable | Synopsis / summary text |
-| `_load_timestamp` | `TIMESTAMP` | **Metadata** | Exact timestamp when record was written to Bronze |
-| `_source_file` | `STRING` | **Metadata** | Source file name / parameter path |
+| `pulled_at` | `STRING` | **Metadata** | Timestamp when the API pull was performed |
+| `source_endpoint` | `STRING` | **Metadata** | TMDB API endpoint URL used |
+| `source_collection` | `STRING` | **Metadata** | Origin: `full_load`, `trending`, or `changed` |
+| `source_file` | `STRING` | **Metadata** | Source JSON file path in the UC Volume |
+| `raw_record` | `STRING` | **Payload** | Full raw JSON string of a single movie record |
+| `batch_id` | `STRING` | **Metadata** | Unique batch identifier (auto-timestamped or user-supplied) |
+| `load_timestamp` | `TIMESTAMP` | **Metadata** | Exact timestamp when record was written to Bronze |
+
+A quarantine table (`workspace.tmdb.quarantine_movies`) captures records that fail schema validation during Bronze ingestion.
 
 ---
 
-### 2. Silver Layer Model (`silver.movies` & `silver.movie_genres`)
+### 2. Silver Layer Model
 
-In the Silver layer, data types are explicitly cast, missing or zero values are standardized, records are deduplicated, and arrays are exploded into relational entities.
+In the Silver layer, raw JSON is parsed with a strict `StructType`, data types are explicitly cast, records are deduplicated (keeping the latest by `load_timestamp`), and the genres array is exploded into two relational tables: a bridge table and a genre lookup.
 
-#### **Table: `silver.movies`**
-*Main movie entity table holding clean, entity-level attributes.*
+#### **Table: `workspace.tmdb.silver_movies`**
+*Main movie entity table holding clean, entity-level attributes. Populated via idempotent Delta `MERGE` keyed on `movie_id`.*
 
 | Column Name | Data Type | Constraint / PK | Transformation / Casting Rule |
 | :--- | :--- | :--- | :--- |
-| `movie_id` | `INTEGER` | **Primary Key** | Renamed from `id`; non-null check enforced |
-| `title` | `STRING` | Non-Null | Stripped whitespace, default `'Unknown Title'` |
-| `release_date` | `DATE` | Nullable | Cast from `STRING` to `DATE` (`yyyy-MM-dd`) |
+| `movie_id` | `INTEGER` | **Primary Key** | Parsed from `raw_record` JSON `id` field; nulls filtered out |
+| `title` | `STRING` | Non-Null | Stripped whitespace; empty/blank titles filtered out |
+| `original_title` | `STRING` | Nullable | Original title from TMDB |
+| `overview` | `STRING` | Nullable | Synopsis / summary text |
+| `release_date` | `DATE` | Nullable | Cast from `STRING` via `try_to_date` (`yyyy-MM-dd`) |
 | `release_year` | `INTEGER` | Derived | Derived via `YEAR(release_date)` |
-| `popularity` | `DOUBLE` | Non-Null | Defaulted to `0.0` if null |
-| `vote_average` | `DOUBLE` | Non-Null | Defaulted to `0.0` if null |
-| `vote_count` | `INTEGER` | Non-Null | Defaulted to `0` if null |
-| `budget` | `BIGINT` | Nullable | Cast to `BIGINT`; `0` converted to `NULL` for clean aggregations |
-| `revenue` | `BIGINT` | Nullable | Cast to `BIGINT`; `0` converted to `NULL` for clean aggregations |
-| `runtime` | `INTEGER` | Nullable | Nullified if `runtime <= 0` |
-| `original_language` | `STRING` | Non-Null | Lowercased ISO code |
-| `overview` | `STRING` | Nullable | Cleaned synopsis text |
-| `_processed_timestamp`| `TIMESTAMP` | **Metadata** | Timestamp when record passed Silver transformation |
+| `popularity` | `DOUBLE` | Nullable | TMDB daily popularity metric |
+| `vote_average` | `DOUBLE` | Nullable | Weighted average user rating (0-10) |
+| `vote_count` | `LONG` | Nullable | Number of user votes cast |
+| `budget` | `LONG` | Nullable | Production budget in USD (from enriched metadata) |
+| `revenue` | `LONG` | Nullable | Global box office revenue in USD (from enriched metadata) |
+| `runtime` | `INTEGER` | Nullable | Movie runtime in minutes (from enriched metadata) |
+| `status` | `STRING` | Nullable | Movie release status (from enriched metadata) |
+| `tagline` | `STRING` | Nullable | Movie tagline (from enriched metadata) |
+| `adult` | `BOOLEAN` | Nullable | Adult content flag from TMDB |
+| `backdrop_path` | `STRING` | Nullable | Backdrop image path on TMDB CDN |
+| `poster_path` | `STRING` | Nullable | Poster image path on TMDB CDN |
+| `original_language` | `STRING` | Nullable | Uppercased ISO 639-1 language code (`TRIM` + `UPPER`) |
+| `source_collection` | `STRING` | **Metadata** | Origin: `full_load`, `trending`, or `changed` |
+| `source_file` | `STRING` | **Metadata** | Source JSON file path from Bronze |
+| `pulled_at` | `DATE` | **Metadata** | Date the API pull was performed |
+| `batch_id` | `STRING` | **Metadata** | Bronze batch identifier |
+| `load_timestamp` | `TIMESTAMP` | **Metadata** | Bronze ingestion timestamp |
+| `updated_at` | `TIMESTAMP` | **Metadata** | Silver processing timestamp (`current_timestamp()`) |
 
-#### **Table: `silver.movie_genres` (Bridge Table)**
-*Relational bridge resolving the 1-to-many relationship between movies and genres without repeating movie metric rows.*
+#### **Table: `workspace.tmdb.silver_genre_bridge`**
+*Relational bridge resolving the many-to-many relationship between movies and genres. Populated via idempotent Delta `MERGE` keyed on `(movie_id, genre_id)`.*
 
-| Column Name | Data Type | Constraint / PK | Description |
+| Column Name | Data Type | Constraint / PK | Transformation / Casting Rule |
 | :--- | :--- | :--- | :--- |
-| `movie_id` | `INTEGER` | **FK (Composite PK)** | References `silver.movies.movie_id` |
-| `genre_id` | `INTEGER` | **FK (Composite PK)** | Numerical genre identifier (Exploded from `genre_ids` array) |
-| `_processed_timestamp`| `TIMESTAMP` | **Metadata** | Processing timestamp |
+| `movie_id` | `LONG` | **FK (Composite PK)** | References `silver_movies.movie_id`; exploded from genres array |
+| `genre_id` | `LONG` | **FK (Composite PK)** | Genre identifier from exploded genres array |
+| `batch_id` | `STRING` | **Metadata** | Bronze batch identifier |
+| `load_timestamp` | `TIMESTAMP` | **Metadata** | Bronze ingestion timestamp |
+| `updated_at` | `TIMESTAMP` | **Metadata** | Silver processing timestamp (`current_timestamp()`) |
+
+#### **Table: `workspace.tmdb.silver_genres`**
+*Genre lookup / dimension table. Populated via idempotent Delta `MERGE` keyed on `genre_id`.*
+
+| Column Name | Data Type | Constraint / PK | Transformation / Casting Rule |
+| :--- | :--- | :--- | :--- |
+| `genre_id` | `LONG` | **Primary Key** | Genre identifier from exploded genres array |
+| `genre_name` | `STRING` | Non-Null | Genre name from TMDB, trimmed; nulls filtered out |
+| `batch_id` | `STRING` | **Metadata** | Bronze batch identifier |
+| `load_timestamp` | `TIMESTAMP` | **Metadata** | Bronze ingestion timestamp |
+| `updated_at` | `TIMESTAMP` | **Metadata** | Silver processing timestamp (`current_timestamp()`) |
+
+#### Entity Relationship
+
+```
+silver_movies (1) ──► (M) silver_genre_bridge (M) ◄── (1) silver_genres
+   movie_id ─────────────── movie_id
+                           genre_id ──────────────── genre_id
+```
 
 ---
 
@@ -92,21 +122,30 @@ In the Silver layer, data types are explicitly cast, missing or zero values are 
 To guarantee pipeline robustness, `inferSchema=True` is disabled across all ingestion paths. Raw JSON inputs are parsed using explicit PySpark `StructType` definitions:
 
 ```python
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType, ArrayType, LongType
+from pyspark.sql.types import (
+    StructType, StructField, StringType, LongType, DoubleType, BooleanType, ArrayType
+)
 
-tmdb_raw_schema = StructType([
-    StructField("id", IntegerType(), False),
-    StructField("title", StringType(), True),
-    StructField("release_date", StringType(), True),
-    StructField("popularity", DoubleType(), True),
-    StructField("vote_average", DoubleType(), True),
-    StructField("vote_count", IntegerType(), True),
-    StructField("budget", LongType(), True),
-    StructField("revenue", DoubleType(), True),
-    StructField("runtime", IntegerType(), True),
-    StructField("genre_ids", ArrayType(IntegerType()), True),
-    StructField("original_language", StringType(), True),
-    StructField("overview", StringType(), True)
+# Schema for parsing the raw_record JSON string in Bronze
+tmdb_movie_schema = StructType([
+    StructField("id",                LongType(),    True),
+    StructField("title",             StringType(),  True),
+    StructField("original_title",    StringType(),  True),
+    StructField("overview",          StringType(),  True),
+    StructField("release_date",      StringType(),  True),
+    StructField("popularity",        DoubleType(),  True),
+    StructField("vote_average",      DoubleType(),  True),
+    StructField("vote_count",        LongType(),    True),
+    StructField("adult",             BooleanType(), True),
+    StructField("backdrop_path",     StringType(),  True),
+    StructField("poster_path",       StringType(),  True),
+    StructField("original_language", StringType(),  True),
+    StructField("genres", ArrayType(
+        StructType([
+            StructField("id",   LongType(),   True),
+            StructField("name", StringType(), True)
+        ])
+    ), True)
 ])
 ```
 
@@ -127,7 +166,7 @@ silver_table.alias("target").merge(
 ```
 
 ### 3. Execution Auditing & Logging
-All execution metrics are captured into a dedicated Delta table `audit.pipeline_execution_logs`:
+All execution metrics are captured into a dedicated Delta table `workspace.tmdb.pipeline_execution_logs`:
 
 | Column | Description |
 | :--- | :--- |
@@ -141,39 +180,67 @@ All execution metrics are captured into a dedicated Delta table `audit.pipeline_
 
 ---
 
-## 🚀 Execution & Backfill Guide
+## 🚀 Execution & Run Instructions
 
-The pipeline uses **Databricks Widgets** for parameterization, allowing seamless execution across standard daily batches and historical backfills without modifying notebook code.
+The pipeline uses **Databricks Widgets** for parameterization, allowing seamless execution across standard daily batches and historical backfills without modifying notebook code. Run the notebooks in order: **Bronze first**, then **Silver**.
 
-### Option A: Triggering a Standard Incremental Run
-Run the notebook or job passing the daily incremental batch parameters:
-```python
-# Pass parameters dynamically via widgets
-dbutils.widgets.text("load_type", "incremental")
-dbutils.widgets.text("file_path", "/mnt/datalake/raw/2026-10-03/incremental_load.json")
-```
+### Notebook 1: `bronze/bronze_injestion`
 
-### Option B: Triggering a Historical Backfill Run
-To re-process or backfill historical datasets for any historical date range or batch file:
-```python
-# Set widgets for full backfill
-dbutils.widgets.text("load_type", "full")
-dbutils.widgets.text("file_path", "/mnt/datalake/raw/historical/full_load.json")
-```
+| Widget | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `load_type` | Dropdown | `all` | `all` (full + incremental), `full` (historical backfill only), or `incremental` (daily changes only) |
+| `source_path` | Text | *(blank)* | Folder or single `.json` file path in the UC Volume (blank = auto-detect from `/Volumes/workspace/tmdb/raw/`) |
+| `batch_id` | Text | *(blank)* | Batch identifier (blank = auto-generated timestamp `YYYYMMDD_HHMMSS`) |
+
+### Notebook 2: `silver/silver_injestion`
+
+| Widget | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `batch_id` | Text | *(blank)* | Bronze batch ID to process (blank = process **all** Bronze records) |
+
+---
+
+### Option A: Incremental Load (Daily Run)
+
+Run fresh data from the TMDB trending and changed-movies endpoints through both layers:
+
+1. **Bronze** — Set `load_type` to `incremental` (or `all`), leave `source_path` blank for auto-detect, and leave `batch_id` blank for an auto-generated ID.
+2. **Silver** — Set `batch_id` to the Bronze batch ID printed in step 1, or leave blank to process all Bronze records (idempotent MERGE handles duplicates).
+
+### Option B: Historical Backfill
+
+Re-process or load historical multi-year movie discovery data:
+
+1. **Bronze** — Set `load_type` to `full` (or `all`), and optionally set `source_path` to a specific historical JSON file or folder under `/Volumes/workspace/tmdb/raw/full_load/`.
+2. **Silver** — Leave `batch_id` blank to process all Bronze records, or specify the Bronze batch ID from step 1 to target only the newly ingested batch.
+
+### Option C: Full Pipeline (Both Incremental + Backfill)
+
+1. **Bronze** — Set `load_type` to `all` to process both full-load and incremental JSON files in a single run.
+2. **Silver** — Leave `batch_id` blank to transform everything from Bronze into Silver.
+
+> **Idempotency:** All Silver writes use Delta `MERGE INTO` with upsert logic, so re-running either notebook on the same batch is safe — existing records are updated, new records are inserted, and no duplicates are created.
 
 ---
 
 ## 📁 Repository Structure
 
 ```text
-├── README.md                          # Project documentation and data models
-├── scripts/
-│   └── tmdb_pull_samples_v2.py        # Python script for year-split & enriched API extraction
-├── notebooks/
-│   ├── 00_audit_logger.py             # Audit framework and log table creation
-│   ├── 01_bronze_ingestion.py         # Explicit-schema raw JSON ingestion to Bronze Delta
-│   └── 02_silver_transformation.py   # Cleansing, casting, bridge creation, & Delta MERGE
-└── data/
-    ├── sample_full_load.json          # Sample enriched full load payload
-    └── sample_incremental_load.json   # Sample changed-movie incremental payload
+TMDB-Data-Engineering-Project/
+├── readme.md                              # Project documentation and data models
+├── test_connection                        # Databricks workspace connectivity test notebook
+├── .gitignore
+├── bronze/
+│   └── bronze_injestion                   # Raw JSON → Bronze Delta (schema-validated, audited)
+├── silver/
+│   └── silver_injestion                    # Bronze → Silver Delta (parse, cast, dedupe, MERGE)
+├── log/
+│   └── 00_audit_logging                   # Audit framework & pipeline_execution_logs table
+├── staging/
+│   ├── full_load.json                     # Full-load API payload (historical multi-year)
+│   ├── full_load_2005_2014.json           # Historical backfill payload (2005–2014)
+│   └── incremental_load.json              # Incremental API payload (trending + changed)
+└── data_retrieval_scripts/
+    ├── tmdb_pullsamples.py                # Python script for year-split & enriched API extraction
+    └── more_data                          # Additional data retrieval notebook
 ```
