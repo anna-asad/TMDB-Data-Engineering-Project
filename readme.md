@@ -10,7 +10,7 @@ This project builds a scalable entertainment data lakehouse to analyze global mo
 
 - **Data Source:** [TMDB REST API v3](https://developer.themoviedb.org/reference/intro/getting-started)
 - **Engine / Compute:** PySpark on Databricks (Community / Student Tier)
-- **Storage Layer:** Delta Lake (Bronze & Silver layers)
+- **Storage Layer:** Delta Lake (Bronze, Silver & Gold layers)
 - **Ingestion Patterns:**
   - **Full Load:** Historical multi-year movie discovery (year-split queries avoiding TMDB's 500-page limit) enriched with granular metadata (`budget`, `revenue`, `runtime`, `keywords`).
   - **Incremental Load:** Daily changed IDs from `/movie/changes` and `/trending/movie/day`, resolved to full movie records for idempotent updates.
@@ -20,11 +20,14 @@ This project builds a scalable entertainment data lakehouse to analyze global mo
 ## 🏗️ Medallion Architecture
 
 ```
-[ TMDB API ] ──(Raw JSON)──► [ Bronze Layer ] ──(Parse / Cleanse / Cast / Dedupe)──► [ Silver Layer ]
+[ TMDB API ] ──(Raw JSON)──► [ Bronze Layer ] ──(Parse / Cleanse / Cast / Dedupe)──► [ Silver Layer ] ──(Star Schema Build)──► [ Gold Layer ]
                                workspace.tmdb.bronze_movies                       (Delta Lake)
                                                                                   ├── workspace.tmdb.silver_movies
                                                                                   ├── workspace.tmdb.silver_genre_bridge
                                                                                   └── workspace.tmdb.silver_genres
+
+Gold Star Schema:  workspace.tmdb.dim_movies · workspace.tmdb.dim_date
+                   workspace.tmdb.fact_movie_performance
 ```
 
 All tables live in the **`workspace.tmdb`** Unity Catalog schema. Raw API payloads are staged as JSON files in the **`workspace.tmdb.raw`** UC Volume before Bronze ingestion.
@@ -114,6 +117,69 @@ silver_movies (1) ──► (M) silver_genre_bridge (M) ◄── (1) silver_gen
                            genre_id ──────────────── genre_id
 ```
 
+### 3. Gold Layer Star Schema
+
+The Gold layer serves analytics-ready data as a classic star schema — two dimensions and one fact table. All tables are Delta Lake with **liquid clustering** (`CLUSTER BY`), populated via idempotent `MERGE INTO`, and maintained with `OPTIMIZE`. Built by `gold/gold_transformation` from `workspace.tmdb.silver_movies`; each run is wrapped in try/except and audit-logged to `pipeline_execution_logs` with layer `Silver-to-Gold` (rows_inserted, status, timing).
+
+#### **Table: `workspace.tmdb.dim_movies`** — movie dimension
+*Idempotent Delta `MERGE` keyed on `movie_id`; liquid clustered by `movie_id`.*
+
+| Column Name | Data Type | Constraint / PK | Description |
+| :--- | :--- | :--- | :--- |
+| `movie_id` | `BIGINT` | **Primary Key** | TMDB movie identifier |
+| `title` | `STRING` | Non-Null | Display title |
+| `original_title` | `STRING` | Nullable | Original-language title |
+| `overview` | `STRING` | Nullable | Synopsis |
+| `release_date` | `DATE` | Nullable | Release date |
+| `status` | `STRING` | Nullable | Release status |
+| `tagline` | `STRING` | Nullable | Marketing tagline |
+
+#### **Table: `workspace.tmdb.dim_date`** — date dimension (one row per distinct release date)
+*Idempotent Delta `MERGE` keyed on `date_key`; liquid clustered by `date_key`.*
+
+| Column Name | Data Type | Constraint / PK | Description |
+| :--- | :--- | :--- | :--- |
+| `date_key` | `INT` | **Primary Key** | YYYYMMDD integer (e.g. `20080417`) |
+| `release_date` | `DATE` | | Release date |
+| `year` | `INT` | | Release year |
+| `quarter` | `INT` | | 1–4 |
+| `month` | `INT` | | 1–12 |
+| `day` | `INT` | | Day of month |
+| `day_of_week` | `INT` | | 1 (Sunday) … 7 (Saturday) |
+
+#### **Table: `workspace.tmdb.fact_movie_performance`** — fact table
+*Grain: one row per movie with a non-null `release_date`. Idempotent Delta `MERGE` keyed on `(movie_id, date_key)`; liquid clustered by `(movie_id, date_key)`.*
+
+| Column Name | Data Type | Constraint / PK | Description |
+| :--- | :--- | :--- | :--- |
+| `movie_id` | `BIGINT` | **FK → dim_movies** | Movie identifier |
+| `date_key` | `INT` | **FK → dim_date** | Release-date key (YYYYMMDD) |
+| `budget` | `BIGINT` | | Production budget (USD) |
+| `revenue` | `BIGINT` | | Global box-office revenue (USD) |
+| `profit` | `BIGINT` | Derived | `revenue - budget` |
+| `roi_percentage` | `DOUBLE` | Derived | `(revenue - budget) / budget * 100`; NULL when `budget <= 0` |
+| `popularity` | `DOUBLE` | | TMDB popularity score |
+| `vote_average` | `DOUBLE` | | User rating (0–10) |
+| `vote_count` | `BIGINT` | | Number of user votes |
+| `batch_id` | `STRING` | **Metadata** | Source Silver batch |
+| `load_timestamp` | `TIMESTAMP` | **Metadata** | Gold load time |
+
+> **Note:** Movies with a `NULL` `release_date` (27 of 197,871) cannot join `dim_date` and are excluded from the fact table. `OPTIMIZE` runs on `dim_movies` and `fact_movie_performance` after each load.
+
+#### Entity Relationship
+
+```
+dim_movies (1) ──► (M) fact_movie_performance (M) ◄── (1) dim_date
+    movie_id ────────────── movie_id
+                           date_key ──────────────── date_key
+```
+
+#### Validation (executed 2026-10-21)
+- `dim_movies` primary-key uniqueness: 197,871 rows, **0 duplicates**
+- Row counts: dim_movies 197,871 · dim_date 8,142 · fact_movie_performance 197,844
+- Star-schema top-10 revenue join verified (Avatar leads: $2.92B revenue, 1133.63% ROI)
+- Audit summary: Raw-to-Bronze 2 runs · Bronze-to-Silver 13 runs · Silver-to-Gold 1 run · 0 rows quarantined
+
 ---
 
 ## 🛠️ Key Pipeline Capabilities
@@ -150,39 +216,47 @@ tmdb_movie_schema = StructType([
 ```
 
 ### 2. Idempotent Upserts (`MERGE INTO`)
-To prevent duplicate records during repeated executions or daily incremental updates, Silver layer writes utilize Delta Lake `MERGE INTO` logic keyed on `movie_id`:
+To prevent duplicate records during repeated executions or daily incremental updates, Silver layer writes utilize Delta Lake `MERGE INTO` logic keyed on the primary key of each table:
 
 ```python
 from delta.tables import DeltaTable
 
-silver_table = DeltaTable.forName(spark, "silver.movies")
+# silver_movies — keyed on movie_id
+movies_table = DeltaTable.forName(spark, "workspace.tmdb.silver_movies")
+(movies_table.alias("target")
+  .merge(silver_movies_df.alias("source"), "target.movie_id = source.movie_id")
+  .whenMatchedUpdate(set={"title": "source.title", ...})
+  .whenNotMatchedInsert(values={"movie_id": "source.movie_id", ...})
+  .execute())
 
-silver_table.alias("target").merge(
-    source=df_silver_updates.alias("source"),
-    condition="target.movie_id = source.movie_id"
-).whenMatchedUpdateAll() \
- .whenNotMatchedInsertAll() \
- .execute()
+# silver_genre_bridge — keyed on (movie_id, genre_id)
+# silver_genres — keyed on genre_id
 ```
+
+Each `MERGE` explicitly maps every target column to its source equivalent in both `whenMatchedUpdate` and `whenNotMatchedInsert` clauses, ensuring full schema parity.
+
+The Gold layer follows the same MERGE-based upsert pattern (keyed on `movie_id` for `dim_movies`, `date_key` for `dim_date`, and `(movie_id, date_key)` for `fact_movie_performance`) and additionally uses Delta **liquid clustering** (`CLUSTER BY`) plus post-load `OPTIMIZE` on `dim_movies` and `fact_movie_performance`.
 
 ### 3. Execution Auditing & Logging
 All execution metrics are captured into a dedicated Delta table `workspace.tmdb.pipeline_execution_logs`:
 
 | Column | Description |
 | :--- | :--- |
-| `execution_id` | Unique UUID for the run batch |
-| `layer_processed` | Processing step (e.g., `RAW_TO_BRONZE`, `BRONZE_TO_SILVER`) |
-| `batch_parameter` | Path or batch ID processed |
-| `start_time` / `end_time` | Precise timestamp range |
-| `status` | `SUCCESS` or `FAILED` |
-| `records_processed` | Number of inserted or merged rows |
-| `error_message` | Error trace if `status == FAILED` |
+| `log_id` | Unique UUID for the run batch |
+| `layer_processed` | Processing step (e.g., `Raw-to-Bronze`, `Bronze-to-Silver`, `Silver-to-Gold`) |
+| `load_type` | `all`, `full`, or `incremental` |
+| `batch_id` | Batch identifier processed |
+| `parameter_processed` | Source path or parameter value |
+| `execution_start_time` / `execution_end_time` | Precise timestamp range |
+| `status` | `SUCCESS` or `FAILURE` |
+| `rows_inserted` / `rows_updated` / `rows_quarantined` | Row-level metrics |
+| `error_message` | Error trace if `status == FAILURE` |
 
 ---
 
 ## 🚀 Execution & Run Instructions
 
-The pipeline uses **Databricks Widgets** for parameterization, allowing seamless execution across standard daily batches and historical backfills without modifying notebook code. Run the notebooks in order: **Bronze first**, then **Silver**.
+The pipeline uses **Databricks Widgets** for parameterization, allowing seamless execution across standard daily batches and historical backfills without modifying notebook code. Run the notebooks in order: **Bronze first**, then **Silver**, then **Gold** — or run the master orchestration notebook to execute all three stages sequentially.
 
 ### Notebook 1: `bronze/bronze_injestion`
 
@@ -199,6 +273,19 @@ The pipeline uses **Databricks Widgets** for parameterization, allowing seamless
 | `batch_id` | Text | *(blank)* | Bronze batch ID to process (blank = process **all** Bronze records) |
 
 ---
+
+### Notebook 3: `gold/gold_transformation`
+
+No widgets — always transforms **all** Silver rows into the Gold star schema (idempotent MERGEs make re-runs safe). Run after `silver_injestion`.
+
+### Notebook 4: `00_master_pipeline` (Master Orchestration)
+
+Runs the entire pipeline end-to-end — `bronze/bronze_injestion` → `silver/silver_injestion` → `gold/gold_transformation` — sequentially via `dbutils.notebook.run()`, with per-stage timing and clear failure reporting (aborts on the first failing stage).
+
+| Widget | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `load_type` | Text | `incremental` | `full` or `incremental` (validated); passed to every stage |
+| `batch_id` | Text | *(blank)* | Passed to every stage (blank = all batches) |
 
 ### Option A: Incremental Load (Daily Run)
 
@@ -221,6 +308,13 @@ Re-process or load historical multi-year movie discovery data:
 
 > **Idempotency:** All Silver writes use Delta `MERGE INTO` with upsert logic, so re-running either notebook on the same batch is safe — existing records are updated, new records are inserted, and no duplicates are created.
 
+### Option D: One-Command End-to-End Run (Master Orchestration)
+
+Run `00_master_pipeline` at the project root to execute all three stages sequentially without opening each notebook:
+
+1. Leave the defaults (`load_type` = `incremental`, `batch_id` blank) for a daily-style run, or set `load_type` = `full` for a historical backfill pass.
+2. Each stage is executed via `dbutils.notebook.run()` (3600s timeout per stage) with both parameters passed down; the run aborts on the first failing stage and reports which stage failed.
+
 ---
 
 ## 📁 Repository Structure
@@ -228,12 +322,15 @@ Re-process or load historical multi-year movie discovery data:
 ```text
 TMDB-Data-Engineering-Project/
 ├── readme.md                              # Project documentation and data models
+├── 00_master_pipeline                      # Master orchestration — runs Bronze → Silver → Gold sequentially
 ├── test_connection                        # Databricks workspace connectivity test notebook
 ├── .gitignore
 ├── bronze/
 │   └── bronze_injestion                   # Raw JSON → Bronze Delta (schema-validated, audited)
 ├── silver/
 │   └── silver_injestion                    # Bronze → Silver Delta (parse, cast, dedupe, MERGE)
+├── gold/
+│   └── gold_transformation                 # Silver → Gold star schema (dim_movies, dim_date, fact_movie_performance)
 ├── log/
 │   └── 00_audit_logging                   # Audit framework & pipeline_execution_logs table
 ├── staging/
