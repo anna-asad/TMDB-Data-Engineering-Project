@@ -5,10 +5,10 @@ import uuid
 from datetime import datetime
 from pyspark.sql import SparkSession
 
-spark = SparkSession.getActiveSession()
+spark = SparkSession.getActiveSession()  #gets current active session 
 
 # ensure catalog and schema exist before creating tables
-spark.sql("CREATE CATALOG IF NOT EXISTS workspace")
+spark.sql("CREATE CATALOG IF NOT EXISTS workspace")  #unity catalogue ensuring hierarchy
 spark.sql("CREATE SCHEMA IF NOT EXISTS workspace.tmdb")
 
 # one row per pipeline run (per layer)
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS workspace.tmdb.quarantine_movies (
 USING DELTA
 """)
 
-
+#reusable function to standardise log creation
 def log_pipeline_execution(layer, load_type, batch_id, parameter, start_time, end_time,
                            status, rows_inserted=0, rows_updated=0, rows_quarantined=0,
                            error_msg="NONE"):
@@ -52,7 +52,7 @@ def log_pipeline_execution(layer, load_type, batch_id, parameter, start_time, en
         str(uuid.uuid4()), layer, load_type, batch_id, str(parameter),
         start_time, end_time, status,
         int(rows_inserted), int(rows_updated), int(rows_quarantined),
-        str(error_msg)[:2000],
+        str(error_msg)[:2000], #prevent huge error strings from causing memory bloat or storage issues
     )]
     schema = spark.table("workspace.tmdb.pipeline_execution_logs").schema
     spark.createDataFrame(row, schema).write.format("delta").mode("append") \
