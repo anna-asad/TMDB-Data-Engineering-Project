@@ -6,6 +6,7 @@
 **Unity Catalog Namespace:** `workspace.tmdb`  
 **Compute Profile:** Serverless / 2X-Small SQL Warehouse  
 **Project Root:** `/Users/l242519@lhr.nu.edu.pk/TMDB-Data-Engineering-Project`  
+**BI Tool:** Power BI Desktop (connected to the Databricks SQL Warehouse)  
 **Data Verified:** All schemas, row counts, clustering properties, and audit metrics below were queried **live** from `system.information_schema` (`workspace.tmdb`), `DESCRIBE DETAIL`, `DESCRIBE HISTORY`, and `workspace.tmdb.pipeline_execution_logs` on 2026-10-21.
 
 ---
@@ -14,36 +15,49 @@
 
 ## 1.1 High-Level Overview
 
-The **TMDB Movie Analytics Lakehouse** is an end-to-end, batch-oriented data platform that ingests raw movie metadata from The Movie Database (TMDB) API and progressively refines it into an analytics-ready **Gold star schema**. The platform follows the **Medallion Architecture** — the canonical Databricks Lakehouse pattern of three incremental data-quality layers (Bronze → Silver → Gold) — implemented entirely on **Delta Lake** tables governed by **Unity Catalog** under the `workspace.tmdb` namespace.
+The **TMDB Movie Analytics Lakehouse** is an end-to-end, batch-oriented data platform that ingests raw movie metadata from The Movie Database (TMDB) REST API and progressively refines it into an analytics-ready **Gold star schema**, which is consumed by a **Power BI** dashboard. The platform follows the **Medallion Architecture**, the canonical Databricks Lakehouse pattern of three incremental data-quality layers (Bronze → Silver → Gold). It is implemented entirely on **Delta Lake** tables governed by **Unity Catalog** under the `workspace.tmdb` namespace.
+
+The business purpose is to analyze global movie trends, ratings, production budgets, revenues, and genre performance over time.
 
 Key architectural characteristics:
 
-* **Single-source-of-truth raw layer** — the full, unmodified TMDB JSON payload is preserved verbatim in Bronze, guaranteeing infinite replayability.
-* **Schema enforcement with a safety net** — Silver applies explicit typing and schema rules, with malformed records quarantined rather than dropped or fatal.
-* **Idempotent, MERGE-based loading** — every layer load is re-runnable with **zero duplicate row additions**, evidenced in the audit log (0 duplicate inserts across all re-runs).
-* **Dimensional Gold star schema** — `dim_movies`, `dim_date`, and `fact_movie_performance` with declared primary/foreign key relationships and **Liquid Clustering** (`CLUSTER BY`) for physical data layout.
-* **End-to-end auditability** — every pipeline run, successful or failed, is logged to `workspace.tmdb.pipeline_execution_logs` (16 rows at time of report).
-* **FinOps-efficient compute** — the entire Gold refresh (403,857 row-level operations across three tables) completes in **~41.33 seconds** on a 2X-Small serverless warehouse.
+* **Single-source-of-truth raw layer**: the full, unmodified TMDB JSON payload is preserved verbatim in Bronze, guaranteeing infinite replayability.
+* **Schema enforcement with a safety net**: Silver applies explicit typing and schema rules, with malformed records quarantined rather than dropped or fatal.
+* **Idempotent, MERGE-based loading**: every layer load is re-runnable with **zero duplicate row additions**, evidenced in the audit log (0 duplicate inserts across all re-runs).
+* **Dimensional Gold star schema**: `dim_movies`, `dim_date`, and `fact_movie_performance` with declared primary/foreign key relationships and **Liquid Clustering** (`CLUSTER BY`) for physical data layout.
+* **Automated end-to-end orchestration**: a master notebook chains Bronze → Silver → Gold, so a new incremental file flows through to Gold without manual steps.
+* **End-to-end auditability**: every pipeline run, successful or failed, is logged to `workspace.tmdb.pipeline_execution_logs` (16 rows at time of report), and the audit table is itself visualized in the BI dashboard.
+* **FinOps-efficient compute**: the entire Gold refresh (403,857 row-level operations across three tables) completes in **~41.33 seconds** on a 2X-Small serverless warehouse.
 
-### Verified Table Inventory (queried 2026-10-21)
+## 1.2 Architecture Diagram
+
+![Architecture Diagram](images/architecture.png)
+
+
+## 1.3 Verified Table Inventory (queried 2026-10-21)
 
 | Table | Layer | Row Count | Delta Files | Size on Disk | Physical Layout |
 | --- | --- | --- | --- | --- | --- |
 | `workspace.tmdb.bronze_movies` | Bronze | **395,556** | 6 | ~84.9 MB | Unpartitioned / unclustered |
 | `workspace.tmdb.silver_movies` | Silver | **197,871** | 1 | ~34.9 MB | Unpartitioned / unclustered |
-| `workspace.tmdb.silver_genres` | Silver (ref) | — | — | — | Genre lookup |
-| `workspace.tmdb.silver_genre_bridge` | Silver (bridge) | — | — | — | Movie-Genre bridge |
+| `workspace.tmdb.silver_genres` | Silver (ref) | n/a | n/a | n/a | Genre lookup |
+| `workspace.tmdb.silver_genre_bridge` | Silver (bridge) | n/a | n/a | n/a | Movie-Genre bridge |
 | `workspace.tmdb.dim_movies` | Gold | **197,871** | 1 | ~27.3 MB | **CLUSTER BY (`movie_id`)** |
 | `workspace.tmdb.dim_date` | Gold | **8,142** | 1 | ~60.7 KB | **CLUSTER BY (`date_key`)** |
 | `workspace.tmdb.fact_movie_performance` | Gold | **197,844** | 1 | ~1.83 MB | **CLUSTER BY (`movie_id`, `date_key`)** |
-| `workspace.tmdb.quarantine_movies` | Quarantine | **0** | — | — | Rejected-record holding area |
-| `workspace.tmdb.pipeline_execution_logs` | Audit | **16** | — | — | Run-level execution ledger |
+| `workspace.tmdb.quarantine_movies` | Quarantine | **0** | n/a | n/a | Rejected-record holding area |
+| `workspace.tmdb.pipeline_execution_logs` | Audit | **16** | n/a | n/a | Run-level execution ledger |
 
-> **Naming note:** the raw landing table is physically materialized as `workspace.tmdb.bronze_movies` — this is the project's "raw movies" Bronze table (raw JSON payload ingestion). No table named `raw_movies` exists in the schema; `bronze_movies` fulfills that role.
+> **Naming note:** the raw landing table is physically materialized as `workspace.tmdb.bronze_movies`. This is the project's "raw movies" Bronze table (raw JSON payload ingestion). No table named `raw_movies` exists in the schema; `bronze_movies` fulfills that role. Raw API payloads are staged as JSON files in the `workspace.tmdb.raw` Unity Catalog Volume before Bronze ingestion.
 
-## 1.2 Bronze Layer — Raw JSON Ingestion (`workspace.tmdb.bronze_movies`)
+## 1.4 Bronze Layer: Raw JSON Ingestion (`workspace.tmdb.bronze_movies`)
 
 The Bronze layer is the immutable landing zone for raw TMDB API responses. It follows a **schema-on-read** philosophy: the source JSON is stored **verbatim** as a string payload, and no parsing, typing, or business rules are applied at this stage. This guarantees that any future parsing logic change can be replayed against the original data without re-hitting the TMDB API.
+
+**Ingestion patterns:**
+
+* **Full load**: historical multi-year movie discovery (year-split queries to avoid TMDB's 500-page limit), enriched with granular metadata (`budget`, `revenue`, `runtime`, `keywords`).
+* **Incremental load**: daily changed IDs from `/movie/changes` and `/trending/movie/day`, resolved to full movie records.
 
 **Verified schema (7 columns):**
 
@@ -52,20 +66,20 @@ The Bronze layer is the immutable landing zone for raw TMDB API responses. It fo
 | `raw_record` | `STRING` | Full, unmodified TMDB JSON payload (schema-on-read) |
 | `batch_id` | `STRING` | Ingestion batch identifier (e.g. `20261009_153323`) |
 | `source_endpoint` | `STRING` | TMDB API endpoint the record came from |
-| `source_collection` | `STRING` | Source TMDB collection identifier |
+| `source_collection` | `STRING` | Origin: `full_load`, `trending`, or `changed` |
 | `source_file` | `STRING` | Source file lineage / provenance metadata |
 | `pulled_at` | `STRING` | API pull timestamp (freshness tie-breaker for Silver dedup) |
 | `load_timestamp` | `TIMESTAMP` | Delta load time (audit lineage) |
 
-**File metadata retention:** every Bronze row carries `batch_id`, `source_file`, `source_endpoint`, `source_collection`, `pulled_at`, and `load_timestamp` — complete file-level lineage that survives into the Silver layer. This makes every downstream record traceable back to the exact source file and API pull.
+**File metadata retention:** every Bronze row carries `batch_id`, `source_file`, `source_endpoint`, `source_collection`, `pulled_at`, and `load_timestamp`. This is complete file-level lineage that survives into the Silver layer, so every downstream record is traceable back to the exact source file and API pull.
 
 **Verified ingestion volume:** 2 successful Raw-to-Bronze runs totaling **395,556 rows** across 2 batches (`20261009_153323`, `20261011_090006`).
 
-## 1.3 Silver Layer — Typed, Cleaned, Enforced (`workspace.tmdb.silver_movies`)
+## 1.5 Silver Layer: Typed, Cleaned, Enforced (`workspace.tmdb.silver_movies`)
 
-The Silver layer transforms the raw JSON payload into a strongly-typed, deduplicated, quality-enforced relational table ready for dimensional modeling.
+The Silver layer transforms the raw JSON payload into a strongly-typed, deduplicated, quality-enforced relational model ready for dimensional modeling. Raw JSON is parsed with an explicit PySpark `StructType` (`inferSchema` is disabled on every ingestion path), and the genres array is exploded into two relational tables: `silver_genre_bridge` (many-to-many, keyed on `(movie_id, genre_id)`) and `silver_genres` (lookup, keyed on `genre_id`).
 
-**Verified schema (24 columns):**
+**Verified schema of `silver_movies` (24 columns):**
 
 | Column | Type | | Column | Type |
 | --- | --- | --- | --- | --- |
@@ -82,9 +96,9 @@ The Silver layer transforms the raw JSON payload into a strongly-typed, deduplic
 | `original_language` | `STRING` | | `backdrop_path` | `STRING` |
 | `updated_at` | `TIMESTAMP` | | `poster_path` | `STRING` |
 
-**Explicit typing & cleaning:** raw JSON fields are cast to explicit Spark types (`INT`, `DATE`, `DOUBLE`, `BIGINT`, `BOOLEAN`), `release_year` is derived from `release_date`, and lineage metadata (`batch_id`, `source_file`, `pulled_at`, `load_timestamp`) is retained from Bronze.
+**Explicit typing & cleaning:** raw JSON fields are cast to explicit Spark types (`INT`, `DATE`, `DOUBLE`, `BIGINT`, `BOOLEAN`). Whitespace is trimmed, null IDs and blank titles are filtered, `release_date` is cast via `try_to_date` (`yyyy-MM-dd`), `release_year` is derived from `release_date`, `original_language` is normalized with `TRIM` + `UPPER`, and lineage metadata (`batch_id`, `source_file`, `pulled_at`, `load_timestamp`) is retained from Bronze.
 
-**Schema enforcement — PERMISSIVE mode with quarantine:** JSON parsing uses `PERMISSIVE` mode. Malformed or corrupt payloads are **not** dropped and do **not** halt the pipeline — they are routed to **`workspace.tmdb.quarantine_movies`** (columns: `layer`, `batch_id`, `source_file`, `reject_reason`, `raw_record`, `load_timestamp`) together with a machine-readable `reject_reason`, preserving the full raw payload for forensic replay. Current quarantine count: **0 rows** — the current TMDB feeds parse cleanly, and the quarantine table stands ready as the safety net for future drift.
+**Schema enforcement: PERMISSIVE mode with quarantine.** JSON parsing uses `PERMISSIVE` mode. Malformed or corrupt payloads are **not** dropped and do **not** halt the pipeline. They are routed to **`workspace.tmdb.quarantine_movies`** (columns: `layer`, `batch_id`, `source_file`, `reject_reason`, `raw_record`, `load_timestamp`) together with a machine-readable `reject_reason`, preserving the full raw payload for forensic replay. Current quarantine count: **0 rows**. The current TMDB feeds parse cleanly, and the quarantine table stands ready as the safety net for future drift.
 
 **MERGE-based deduplication (idempotent upsert):** duplicate `movie_id`s across overlapping batches are resolved by a Delta `MERGE INTO` keyed on `movie_id`, with a **freshness predicate** so only newer pulls overwrite older ones:
 
@@ -96,61 +110,57 @@ WHEN MATCHED AND s.pulled_at > t.pulled_at THEN UPDATE SET *
 WHEN NOT MATCHED THEN INSERT *
 ```
 
-The `s.pulled_at > t.pulled_at` condition guarantees that a re-processed file **never duplicates rows and never regresses data freshness** — older re-arrivals are simply ignored, and only strictly-newer versions update the target.
+The `s.pulled_at > t.pulled_at` condition guarantees that a re-processed file **never duplicates rows and never regresses data freshness**. Older re-arrivals are simply ignored, and only strictly-newer versions update the target.
 
-## 1.4 Gold Layer — Star Schema (`dim_movies`, `dim_date`, `fact_movie_performance`)
+## 1.6 Gold Layer: Star Schema (`dim_movies`, `dim_date`, `fact_movie_performance`)
 
-The Gold layer is a classic **Kimball star schema** purpose-built for analytical consumption (BI, dashboards, ad-hoc SQL):
+The Gold layer is a classic **Kimball star schema** purpose-built for analytical consumption (BI, dashboards, ad-hoc SQL). It is a genuine dimensional remodel of Silver, not a copy: descriptive attributes are separated into dimensions, a date dimension is generated from distinct release dates, and the fact table holds the numeric measures plus derived metrics (`profit`, `roi_percentage`).
 
-```
-                 dim_movies (197,871 rows)
-                     PK movie_id
-                        |
-                        | movie_id (FK)
-                        v
- fact_movie_performance (197,844 rows)
-  PK (movie_id, date_key)
-                        ^
-                        | date_key (FK)
-                        |
-                  dim_date (8,142 rows)
-                    PK date_key
-```
+**Fact vs. dimension identification:**
 
-**Verified Gold schemas:**
+| Table | Type | Role |
+| --- | --- | --- |
+| `fact_movie_performance` | **Fact** | Metrics: budget, revenue, profit, ROI, popularity, vote average, vote count |
+| `dim_movies` | **Dimension** | Descriptive movie attributes: title, original title, overview, status, tagline |
+| `dim_date` | **Dimension** | Time attributes: year, quarter, month, day, day of week |
+
+### Entity-Relationship Diagram
+![Gold ER Diagram](images/er_diagram.png)
+### Gold Data Dictionary
 
 | `dim_movies` (7 cols) | Type | | `dim_date` (7 cols) | Type |
 | --- | --- | --- | --- | --- |
 | `movie_id` **(PK)** | `BIGINT` | | `date_key` **(PK)** | `INT` (YYYYMMDD) |
 | `title` | `STRING` | | `release_date` | `DATE` |
 | `original_title` | `STRING` | | `year` | `INT` |
-| `overview` | `STRING` | | `quarter` | `INT` |
-| `release_date` | `DATE` | | `month` | `INT` |
+| `overview` | `STRING` | | `quarter` | `INT` (1–4) |
+| `release_date` | `DATE` | | `month` | `INT` (1–12) |
 | `status` | `STRING` | | `day` | `INT` |
-| `tagline` | `STRING` | | `day_of_week` | `INT` |
+| `tagline` | `STRING` | | `day_of_week` | `INT` (1 = Sunday … 7 = Saturday) |
 
 | `fact_movie_performance` (11 cols) | Type | Notes |
 | --- | --- | --- |
-| `movie_id` **(FK → dim_movies)** | `BIGINT` | Degenerate dimension, part of grain PK |
+| `movie_id` **(FK → dim_movies)** | `BIGINT` | Part of grain PK |
 | `date_key` **(FK → dim_date)** | `INT` | Part of grain PK |
-| `budget` | `BIGINT` | |
-| `revenue` | `BIGINT` | |
+| `budget` | `BIGINT` | Production budget (USD) |
+| `revenue` | `BIGINT` | Global box-office revenue (USD) |
 | `profit` | `BIGINT` | Derived: `revenue − budget` |
-| `roi_percentage` | `DOUBLE` | `NULL` when `budget <= 0` (avoids divide-by-zero / meaningless ROI) |
-| `popularity` | `DOUBLE` | |
-| `vote_average` | `DOUBLE` | |
-| `vote_count` | `BIGINT` | |
+| `roi_percentage` | `DOUBLE` | Derived: `(revenue − budget) / budget × 100`; `NULL` when `budget <= 0` (avoids divide-by-zero / meaningless ROI) |
+| `popularity` | `DOUBLE` | TMDB popularity score |
+| `vote_average` | `DOUBLE` | User rating (0–10) |
+| `vote_count` | `BIGINT` | Number of user votes |
 | `batch_id` | `STRING` | Lineage |
 | `load_timestamp` | `TIMESTAMP` | Lineage |
 
 **Key integrity properties:**
 
-* `dim_movies.movie_id` is the primary key (197,871 distinct movies); `fact_movie_performance.movie_id` is a foreign key to it.
+* `dim_movies.movie_id` is the primary key (197,871 distinct movies, **0 duplicates** verified); `fact_movie_performance.movie_id` is a foreign key to it.
 * `dim_date.date_key` (integer `YYYYMMDD`) is the primary key; `fact_movie_performance.date_key` is a foreign key to it.
-* The fact grain is **one row per movie per release date** — composite key `(movie_id, date_key)`.
+* The fact grain is **one row per movie per release date**, with composite key `(movie_id, date_key)`.
 * **27 Silver rows with NULL `release_date` are excluded** from the fact table (they cannot join `dim_date`): 197,871 − 197,844 = 27, exactly matching the Gold notebook's printed row reconciliation.
+* **Genre analysis** uses the Silver `silver_genre_bridge` and `silver_genres` tables (many-to-many), which are brought into the BI model alongside the Gold star (see Section 4.2).
 
-**Liquid Clustering (verified via `DESCRIBE DETAIL`):**
+### Read Optimization: Liquid Clustering (verified via `DESCRIBE DETAIL`)
 
 ```sql
 CREATE TABLE IF NOT EXISTS workspace.tmdb.dim_movies (
@@ -175,69 +185,88 @@ CREATE TABLE IF NOT EXISTS workspace.tmdb.fact_movie_performance (
 | --- | --- | --- |
 | `dim_movies` | `movie_id` | PK lookup / point queries cluster to a single file region |
 | `dim_date` | `date_key` | Time-range queries prune to relevant date ranges |
-| `fact_movie_performance` | `movie_id`, `date_key` | Composite — matches the MERGE join keys and the grain PK, so upserts and analytical filters both skip irrelevant files |
+| `fact_movie_performance` | `movie_id`, `date_key` | Composite; matches the MERGE join keys and the grain PK, so upserts and analytical filters both skip irrelevant files |
+
+`OPTIMIZE` runs on `dim_movies` and `fact_movie_performance` after each Gold load.
+
+### Validation (executed 2026-10-21)
+
+* `dim_movies` primary-key uniqueness: 197,871 rows, **0 duplicates**
+* Row counts: `dim_movies` 197,871 · `dim_date` 8,142 · `fact_movie_performance` 197,844
+* Star-schema top-10 revenue join verified (Avatar leads: $2.92B revenue, 1133.63% ROI)
+* Audit summary: Raw-to-Bronze 2 runs · Bronze-to-Silver 13 runs (3 success, 10 failure) · Silver-to-Gold 1 run · 0 rows quarantined
 
 ---
 
-# 2. Technical Rationale & Architecture Defense
+# 2. Decision Log: Technical Rationale & Architecture Defense
 
-## 2.1 Schema Drift & Corrupt Records — PERMISSIVE Parsing + Quarantine over Strict Halt
+## 2.1 Schema Drift & Corrupt Records: PERMISSIVE Parsing + Quarantine over Strict Halt
 
 A pipeline that parses external API payloads in `FAILFAST` / strict mode is an **availability liability**: one malformed record, one new field, or one upstream type change (e.g. TMDB returning `popularity` as a string on an overflow) crashes the entire batch, blocks every downstream layer, and requires an engineer to intervene before the next run.
 
 The **PERMISSIVE + quarantine** pattern chosen for this project instead treats parsing as a **filter, not a gate**:
 
-1. **Good records flow through** — 99.9%+ of healthy payload parses continue uninterrupted, so data latency is unaffected by a handful of bad records.
-2. **Bad records are captured, not lost** — corrupt rows land in `workspace.tmdb.quarantine_movies` with `reject_reason` and the **full raw payload** (`raw_record`), enabling root-cause analysis and replay after the parser is fixed. Nothing is silently dropped.
-3. **Schema drift is observable, not fatal** — new or changed source fields surface in the quarantine table's reject reasons long before they can corrupt the Silver contract.
-4. **Bad-data blast radius is contained** — a quarantined record can never pollute the Gold star schema, because it never enters Silver.
+1. **Good records flow through**: healthy payloads continue uninterrupted, so data latency is unaffected by a handful of bad records.
+2. **Bad records are captured, not lost**: corrupt rows land in `workspace.tmdb.quarantine_movies` with `reject_reason` and the **full raw payload** (`raw_record`), enabling root-cause analysis and replay after the parser is fixed. Nothing is silently dropped.
+3. **Schema drift is observable, not fatal**: new or changed source fields surface in the quarantine table's reject reasons long before they can corrupt the Silver contract. Because Bronze keeps the full raw JSON, new source fields can be adopted later by extending the Silver `StructType` and replaying, with no API re-pull.
+4. **Bad-data blast radius is contained**: a quarantined record can never pollute the Gold star schema, because it never enters Silver.
+
+**What actually happened (honest account):** no source-side schema drift occurred during this project. `quarantine_movies` holds 0 rows, and every TMDB payload parsed cleanly against the explicit `StructType`. The 10 failures in the audit log (Section 3.3) were **development-time `DELTA_MERGE_UNRESOLVED_EXPRESSION` errors**, where the Silver MERGE clause referenced columns not resolvable in the source view. They were not drift in the TMDB feed. They were resolved by correcting the MERGE column mapping (an explicit source-to-target mapping for every column in `whenMatchedUpdate` / `whenNotMatchedInsert`), and the subsequent run succeeded. The drift-handling design is therefore a verified-by-construction safety net rather than something exercised by a live incident.
 
 This is the industry-standard "dead-letter queue" discipline for Lakehouse ingestion: the pipeline **keeps running**, the anomaly is **isolated and auditable**, and recovery is a bounded, targeted re-process instead of a full pipeline outage.
 
-## 2.2 Idempotency Strategy — MERGE Freshness Predicate, Zero Duplicate Inserts
+## 2.2 Idempotency Strategy: MERGE Freshness Predicate, Zero Duplicate Inserts
 
-Idempotency — re-running a load with the same input producing the same table state — is the single most important reliability property for a batch pipeline, because in the real world **duplicate deliveries, re-uploaded files, and retried runs are routine**.
+Idempotency (re-running a load with the same input produces the same table state) is the single most important reliability property for a batch pipeline, because in the real world **duplicate deliveries, re-uploaded files, and retried runs are routine**.
 
-The Silver layer achieves it with the `MERGE INTO` freshness condition (`s.pulled_at > t.pulled_at`) and the Gold layers with key-based `MERGE` (`whenMatchedUpdateAll()` / `whenNotMatchedInsertAll()`). The mechanism:
+The Silver layer achieves it with the `MERGE INTO` freshness condition (`s.pulled_at > t.pulled_at`) and the Gold layer with key-based `MERGE` (`whenMatchedUpdateAll()` / `whenNotMatchedInsertAll()`). The mechanism:
 
 * A key match means the record already exists → **UPDATE** in place (never a second INSERT).
-* The `pulled_at` comparison means the update only fires when the incoming record is **strictly newer** — a stale re-delivery of an old file is a no-op.
+* The `pulled_at` comparison means the update only fires when the incoming record is **strictly newer**, so a stale re-delivery of an old file is a no-op.
 * A key miss means genuinely new → single INSERT.
 
-**Verified evidence from `workspace.tmdb.pipeline_execution_logs` — 0 duplicate inserts across all re-runs:**
+**Verified evidence from `workspace.tmdb.pipeline_execution_logs`: 0 duplicate inserts across all re-runs:**
 
 | Date | Event | Result |
 | --- | --- | --- |
 | 2026-10-09 15:34 | First Silver load of batch `20261009_153323` | 197,519 **inserted**, 0 updated |
-| 2026-10-09 16:00 | **Exact same batch re-run** 26 minutes later | **0 inserted**, 197,519 updated — no duplicates added |
-| 2026-10-21 10:24 | Gold load (full re-read of all 197,871 Silver rows) | **0 inserted**, 403,857 updated across dim+date+fact — no duplicates added |
+| 2026-10-09 16:00 | **Exact same batch re-run** 26 minutes later | **0 inserted**, 197,519 updated, no duplicates added |
+| 2026-10-21 10:24 | Gold load (full re-read of all 197,871 Silver rows) | **0 inserted**, 403,857 updated across dim+date+fact, no duplicates added |
 
-The 16:00 re-run is the smoking gun: the identical file was reprocessed and the audit log recorded `rows_inserted = 0` — the MERGE keys absorbed every row into updates. Re-running the master pipeline any number of times with the same inputs converges to the **same table state** with **zero duplicate row additions**.
+The 16:00 re-run is the key proof: the identical file was reprocessed and the audit log recorded `rows_inserted = 0`, meaning the MERGE keys absorbed every row into updates. Re-running the master pipeline any number of times with the same inputs converges to the **same table state** with **zero duplicate row additions**.
 
-## 2.3 Liquid Clustering vs. Hive-Style Partitioning
+## 2.3 Choice of Physical Layout: Liquid Clustering vs. Hive-Style Partitioning
 
-**Hive-style partitioning** physically splits a table into directory trees keyed on partition columns (e.g. `PARTITIONED BY (release_date)` or by genre). It is the legacy default, but it fails on this workload:
+**Why not partition columns?** Hive-style partitioning physically splits a table into directory trees keyed on partition columns (e.g. `PARTITIONED BY (release_date)` or by genre). It is the legacy default, but it fails on this workload:
 
-* **Small-file explosion** — with ~200K movies across 8,142 distinct release dates in Gold, date partitioning produces thousands of directories, each holding a handful of small files. Small files destroy Delta snapshot and listing performance, inflate cloud-storage request costs, and slow every `OPTIMIZE`/`VACUUM` cycle.
-* **Cardinality collapse** — genre is a low-cardinality *many-to-many* attribute (a movie has multiple genres via `silver_genre_bridge`), so genre partitioning is not even expressible on the movie-grain tables without denormalization, and would still produce skewed partitions.
-* **Rigid layout** — Hive partition keys cannot be changed without a full table rewrite; a wrong initial choice is expensive to undo.
+* **Small-file explosion**: with ~200K movies across 8,142 distinct release dates in Gold, date partitioning produces thousands of directories, each holding a handful of small files. Small files destroy Delta snapshot and listing performance, inflate cloud-storage request costs, and slow every `OPTIMIZE`/`VACUUM` cycle.
+* **Cardinality mismatch**: genre is a low-cardinality *many-to-many* attribute (a movie has multiple genres via `silver_genre_bridge`), so genre partitioning is not even expressible on the movie-grain tables without denormalization, and would still produce skewed partitions.
+* **Rigid layout**: Hive partition keys cannot be changed without a full table rewrite; a wrong initial choice is expensive to undo.
 
-**Delta Liquid Clustering** replaces directory partitioning with intelligent, incremental data layout:
+**Why Liquid Clustering?** Delta Liquid Clustering replaces directory partitioning with intelligent, incremental data layout:
 
-* **No directory explosion** — data is laid out in clustered *files*, not directory trees; 197,871 `dim_movies` rows currently occupy **1 file (~27.3 MB)**, and the 197,844-row fact table **1 file (~1.83 MB)**. This is the exact opposite of the small-file problem.
-* **Layout on the query keys** — `CLUSTER BY (movie_id)` / `(date_key)` / `(movie_id, date_key)` co-locates rows sharing key ranges within the same files, so point lookups on the primary key read one file region and range queries on dates skip irrelevant clusters.
-* **Incremental reclustering** — `OPTIMIZE` (executed after each Gold MERGE) reclusters incrementally on writes; no full-rewrite cost.
-* **Evolution-friendly** — clustering keys can be changed on an existing table (`ALTER TABLE ... CLUSTER BY`), unlike physical partition columns.
+* **No directory explosion**: data is laid out in clustered *files*, not directory trees; 197,871 `dim_movies` rows currently occupy **1 file (~27.3 MB)**, and the 197,844-row fact table **1 file (~1.83 MB)**. This is the exact opposite of the small-file problem.
+* **Layout on the query keys**: `CLUSTER BY (movie_id)` / `(date_key)` / `(movie_id, date_key)` co-locates rows sharing key ranges within the same files, so point lookups on the primary key read one file region and range queries on dates skip irrelevant clusters.
+* **Incremental reclustering**: `OPTIMIZE` (executed after each Gold MERGE) reclusters incrementally; no full-rewrite cost.
+* **Evolution-friendly**: clustering keys can be changed on an existing table (`ALTER TABLE ... CLUSTER BY`), unlike physical partition columns.
 
-For a fact-dimension workload with high-cardinality keys (`movie_id` ≈ 197K distinct), **liquid clustering is categorically the correct layout choice**: granular keys that would be catastrophic as Hive partitions work perfectly as clustering keys.
+**Column choices:** `movie_id` is the PK and the MERGE join key, `date_key` is the time-slicing key used by every trend query, and the fact table uses both because they form the grain PK and match the MERGE predicate. For a fact-dimension workload with high-cardinality keys (`movie_id` ≈ 197K distinct), liquid clustering is the correct choice: granular keys that would be catastrophic as Hive partitions work well as clustering keys. Bronze and Silver are intentionally left unclustered. They are written and read in full by the pipeline, not queried selectively, so clustering would add maintenance cost for no read benefit.
+
+## 2.4 PII & Data Governance
+
+* **Data classification:** the TMDB dataset consists of **public movie metadata**: titles, overviews, release dates, budgets, revenues, ratings, genres, and image paths. No Silver or Gold column contains personal data (no names of individuals, emails, addresses, phone numbers, IP addresses, or user identifiers). The `adult` column is a TMDB content-rating flag on the movie, not a personal attribute.
+* **Conclusion:** no PII masking or tokenization was required for this dataset, and none was applied.
+* **Credentials:** the TMDB API key is a secret, not data. It should be kept out of notebooks and the GitHub repository (via Databricks Secrets or environment variables, and `.gitignore`). *[CONFIRM how your extraction script reads the key and adjust this sentence accordingly.]*
+* **If PII were introduced** (e.g. user-level ratings or reviewer accounts), the design supports the following without re-architecture: hash/pseudonymize identifiers in Silver (raw values remain only in access-restricted Bronze), apply Unity Catalog **column masks** and **row filters** on Gold, grant `SELECT` on Gold only (not Bronze) to BI users, and use Unity Catalog lineage and audit logs to trace access.
+* **Access model:** all tables live in Unity Catalog under `workspace.tmdb`, so access can be governed per-table with `GRANT`/`REVOKE`.
 
 ---
 
 # 3. Orchestration & Audit Logging Evaluation
 
-## 3.1 Master Orchestration — `00_master_pipeline`
+## 3.1 Master Orchestration: `00_master_pipeline`
 
-The **`00_master_pipeline`** notebook (project root) is the single command center for the end-to-end flow. It runs the three medallion stages **sequentially**, each as an isolated child-notebook execution:
+The **`00_master_pipeline`** notebook (project root) is the single command center for the end-to-end flow. It runs the three medallion stages **sequentially**, each as an isolated child-notebook execution. Gold is the final stage of the chain, so when a new incremental file is processed into Silver, the Gold tables refresh automatically in the same run.
 
 | Order | Stage | Child Notebook |
 | --- | --- | --- |
@@ -258,9 +287,9 @@ if load_type not in ("full", "incremental"):
     raise ValueError(f"Invalid load_type '{load_type}'. Use 'full' or 'incremental'.")
 ```
 
-* **`load_type`** (default `incremental`) — selects full vs. incremental processing semantics in each stage.
-* **`batch_id`** (default blank) — restricts processing to a single ingestion batch; blank = all batches.
-* Invalid `load_type` values are rejected up front with a hard `ValueError` — fail-fast before any data moves.
+* **`load_type`** (default `incremental`) selects full vs. incremental processing semantics in each stage.
+* **`batch_id`** (default blank) restricts processing to a single ingestion batch; blank = all batches.
+* Invalid `load_type` values are rejected up front with a hard `ValueError`, failing fast before any data moves.
 
 **Stage execution & failure isolation (`try/except`):**
 
@@ -287,14 +316,14 @@ except Exception as e:
 
 Design strengths:
 
-* **`dbutils.notebook.run()` with a 3,600-second per-stage timeout** — each stage is an isolated child run; a hung stage cannot wedge the orchestrator indefinitely, and parameters are passed explicitly as a dict.
-* **Stage failure isolation** — the `try/except` records exactly which stage failed (`current_stage`), prints a per-stage success/failure summary, and re-raises so the run surfaces as FAILED. Completed stages keep their results — no all-or-nothing rollback of earlier layers.
-* **Sequential dependency correctness** — Bronze completes before Silver starts, Silver before Gold, matching the data dependency chain.
-* **Relative paths** — the orchestrator is location-portable within the project structure.
+* **`dbutils.notebook.run()` with a 3,600-second per-stage timeout**: each stage is an isolated child run; a hung stage cannot wedge the orchestrator indefinitely, and parameters are passed explicitly as a dict.
+* **Stage failure isolation**: the `try/except` records exactly which stage failed (`current_stage`), prints a per-stage success/failure summary, and re-raises so the run surfaces as FAILED. Completed stages keep their results; there is no all-or-nothing rollback of earlier layers.
+* **Sequential dependency correctness**: Bronze completes before Silver starts, Silver before Gold, matching the data dependency chain.
+* **Relative paths**: the orchestrator is location-portable within the project structure.
 
-## 3.2 Audit Logging Framework — `workspace.tmdb.pipeline_execution_logs`
+## 3.2 Audit Logging Framework: `workspace.tmdb.pipeline_execution_logs`
 
-Every stage notebook calls the shared `log/00_audit_logging` helper (`log_pipeline_execution(layer, load_type, batch_id, parameter, start_time, end_time, status, rows_inserted, rows_updated, rows_quarantined, error_msg)`) in **both its success and exception paths**, so the audit ledger captures failures as first-class events. One row per run; **16 rows total**, all queried live for this report:
+Every stage notebook (including `gold/gold_transformation`, i.e. the Silver-to-Gold step) calls the shared `log/00_audit_logging` helper (`log_pipeline_execution(layer, load_type, batch_id, parameter, start_time, end_time, status, rows_inserted, rows_updated, rows_quarantined, error_msg)`) in **both its success and exception paths**, so the audit ledger captures failures as first-class events. The table records `log_id`, `layer_processed`, `load_type`, `batch_id`, `parameter_processed`, `execution_start_time` / `execution_end_time`, `status`, `rows_inserted` / `rows_updated` / `rows_quarantined`, and `error_message`. One row per run; **16 rows total**, all queried live for this report:
 
 | Layer | `load_type` | `batch_id` | Start (UTC) | Status | Inserted | Updated | Quarantined | Duration |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -308,7 +337,7 @@ Every stage notebook calls the shared `log/00_audit_logging` helper (`log_pipeli
 
 ## 3.3 Verified Per-Layer Run Metrics
 
-**Raw-to-Bronze — 2 runs, 395,556 rows ingested:**
+**Raw-to-Bronze: 2 runs, 395,556 rows ingested:**
 
 | Metric | Value |
 | --- | --- |
@@ -318,21 +347,21 @@ Every stage notebook calls the shared `log/00_audit_logging` helper (`log_pipeli
 | **Total Bronze rows** | **395,556** (verified `COUNT(*)` = 395,556 across 2 distinct batches) |
 | Failure logs | 0 |
 
-**Bronze-to-Silver — 3 successful runs, 592,909 rows processed, 10 failures trapped:**
+**Bronze-to-Silver: 3 successful runs, 592,909 rows processed, 10 failures trapped:**
 
 | Metric | Value |
 | --- | --- |
 | Successful runs | 3 (2026-10-09 ×2, 2026-10-11 ×1) |
 | Rows processed (run 1) | 197,519 inserted |
-| Rows processed (run 2 — re-run) | 197,519 updated, 0 inserted (idempotency proof) |
+| Rows processed (run 2, re-run) | 197,519 updated, 0 inserted (idempotency proof) |
 | Rows processed (run 3) | 197,871 inserted |
 | **Total processed rows** | **592,909** |
 | Current Silver row count | 197,871 (deduplicated) |
-| **Failure logs trapped** | **10** — all `Bronze-to-Silver` / `delta_parse` on 2026-10-11, each with a full `[DELTA_MERGE_UNRESOLVED_EXPRESSION]` error message preserved in `error_message` |
+| **Failure logs trapped** | **10**, all `Bronze-to-Silver` / `delta_parse` on 2026-10-11, each with a full `[DELTA_MERGE_UNRESOLVED_EXPRESSION]` error message preserved in `error_message` |
 
-The 10 failure rows are the audit framework proving its worth: they are **historical development failures** (column-resolution errors while the incremental-parse MERGE clause was being iterated — e.g. *"Cannot resolve budget in UPDATE clause"*, *"Cannot resolve release_year"*, *"Cannot resolve title"*). Each was captured with layer, load type, batch, timestamps, status, and the raw exception text — none of them halted a later stage from being fixed and retried, and the 09:31:24 run that succeeded afterwards is logged right alongside them. This is precisely the forensic record a production support team needs: **when it broke, what broke, for which batch — without guessing.**
+The 10 failure rows are the audit framework proving its worth: they are **historical development failures** (column-resolution errors while the incremental-parse MERGE clause was being iterated, e.g. *"Cannot resolve budget in UPDATE clause"*, *"Cannot resolve release_year"*, *"Cannot resolve title"*). Each was captured with layer, load type, batch, timestamps, status, and the raw exception text. The 09:31:24 run that succeeded afterwards is logged right alongside them. This is precisely the forensic record a production support team needs: **when it broke, what broke, for which batch, without guessing.**
 
-**Silver-to-Gold — 1 run, 403,857 row-level operations in ~41.33 s:**
+**Silver-to-Gold: 1 run, 403,857 row-level operations in ~41.33 s:**
 
 | Metric | Value |
 | --- | --- |
@@ -349,59 +378,155 @@ The 403,857 figure reconciles exactly: every Gold row was upserted once, **zero 
 
 ---
 
-# 4. Spark Execution UI & DAG Analysis
+# 4. Business Intelligence Layer (Power BI)
 
-## 4.1 Execution Mechanics of the Gold-Layer MERGE
+## 4.1 Connection & Data Access
 
-The Silver-to-Gold stage executes three sequential `MERGE INTO` operations. Under the Spark execution model, each `MERGE` compiles to a job with a characteristic DAG:
+Power BI Desktop is connected directly to the Databricks workspace through the **Azure Databricks / Databricks connector**, using the **Server Hostname** and **HTTP Path** of the serverless SQL warehouse and authenticating with a personal access token or OAuth. *[CONFIRM: authentication method and storage mode (Import or DirectQuery).]* Only Gold tables, the genre reference tables, and the operational tables listed below are loaded; Bronze is never exposed to BI users.
 
-1. **Source scan** — `FileScan` over the single-file `silver_movies` Delta table (~35 MB), applying column pruning (only the 7–11 columns each target needs are read).
-2. **Deduplication** — `dropDuplicates(["movie_id"])` / `distinct()` stages introduce `Aggregate` nodes with hash-based partial-to-final aggregation exchanges.
-3. **Target join** — the source DataFrame is joined against the Delta target's files on the merge condition (e.g. `target.movie_id = source.movie_id AND target.date_key = source.date_key`), producing matched/unmatched row sets.
-4. **Rewrite phase** — matched rows flow to an update/`WriteFiles` branch, unmatched to an insert branch; Delta rewrites only the affected files (with `CLUSTER BY` keys aligned to the merge keys, data changes localize to the same physical files).
-5. **Commit** — the transaction commits to the Delta log (`operation = MERGE`), with `operationMetrics` captured by `get_merge_metrics()` via `DESCRIBE HISTORY` and written to the audit log.
+| Power BI Table | Source Table | Purpose |
+| --- | --- | --- |
+| `fact_movie_performance` | `workspace.tmdb.fact_movie_performance` | Fact: metrics |
+| `dim_movies` | `workspace.tmdb.dim_movies` | Dimension: movie attributes |
+| `dim_date` | `workspace.tmdb.dim_date` | Dimension: time hierarchy |
+| `silver_genre_bridge` | `workspace.tmdb.silver_genre_bridge` | Genre ↔ movie bridge |
+| `silver_genres` | `workspace.tmdb.silver_genres` | Genre lookup |
+| `pipeline_execution_logs` | `workspace.tmdb.pipeline_execution_logs` | Audit visuals |
+| `quarantine_movies` | `workspace.tmdb.quarantine_movies` | Error / data-quality visuals |
 
-Because the fact table's clustering keys `(movie_id, date_key)` **are** its MERGE join keys, the join predicate aligns with the physical layout — the join-to-touched-files mapping is near-optimal, which is a large part of why the whole three-table Gold refresh finished in ~41 seconds.
+## 4.2 Semantic Model (Star Schema in Power BI Model View)
 
-## 4.2 Broadcast Hash Joins vs. Shuffle Hash Joins (Foreign-Key Lookups)
+The Power BI model mirrors the Gold star schema exactly, with explicit one-to-many relationships configured in Model view:
 
-The Gold transformation performs foreign-key lookups on `movie_id` and `date_key`. Spark's Catalyst optimizer chooses between two join physical strategies:
+| From (One side) | To (Many side) | Cardinality | Cross-filter |
+| --- | --- | --- | --- |
+| `dim_movies[movie_id]` | `fact_movie_performance[movie_id]` | One-to-many (1:*) | Single (dim → fact) |
+| `dim_date[date_key]` | `fact_movie_performance[date_key]` | One-to-many (1:*) | Single (dim → fact) |
+| `dim_movies[movie_id]` | `silver_genre_bridge[movie_id]` | One-to-many (1:*) | Single |
+| `silver_genres[genre_id]` | `silver_genre_bridge[genre_id]` | One-to-many (1:*) | Single |
 
-**Broadcast Hash Join (BHJ)** — chosen when one side fits in memory under `spark.sql.autoBroadcastJoinThreshold` (default 10 MB):
+The audit tables (`pipeline_execution_logs`, `quarantine_movies`) are intentionally standalone: they describe pipeline operations, not movies, and are not related to the star schema.
 
-* The small side is collected to the driver, broadcast as a `BroadcastExchange` hash table to every executor, and the big side is scanned **once, with no shuffle at all** — each executor probes the local hash copy per row.
-* **`dim_date` (8,142 rows, ~60 KB)** is a textbook broadcast candidate: its lookup to resolve `release_date → date_key` runs as a Broadcast Hash Join, costing one tiny broadcast and zero network shuffle of the ~198K-row source.
+![Power BI Model View](images/powerbi_model_view.png)
 
-**Shuffle Hash Join / Sort-Merge Join (SMJ)** — chosen when both sides exceed the broadcast threshold:
+*Figure 4.1: Power BI Model view showing the star schema relationships.* *[Add screenshot.]*
 
-* Both sides are repartitioned (`Exchange hashpartitioning(...)` on the join key) so matching rows land in the same task, then hashed or sort-merged per partition.
-* **`dim_movies` (~27 MB, 197,871 rows)** exceeds the 10 MB default threshold, so its joins run through a shuffle/sort-merge path — with **Adaptive Query Execution (AQE)** enabled (serverless default), Spark can at runtime convert a planned sort-merge join into a shuffled hash join or even re-plan a broadcast if the actual, statistics-corrected side size turns out small enough.
+## 4.3 Business Questions & Dashboard
 
-**Why this matters for this pipeline:** dimensional schemas are the ideal broadcast workload — the tiny `dim_date` side eliminates the most expensive possible operation (shuffling the fact-grain source) from every `date_key` lookup, and AQE ensures the optimizer keeps making the right call as table sizes evolve. The broadcast decision is visible directly in the Spark UI DAG (a `BroadcastExchange` node feeding a `BroadcastHashJoin` operator) versus a pair of `Exchange` nodes feeding a `SortMergeJoin`.
+The dashboard answers the Phase 1 business questions. *[REPLACE the placeholder questions below with your exact Phase 1 questions if they differ.]*
 
-## 4.3 Delta Log Predicate Pushdown & File Skipping
+| # | Business Question | Visual | Fields |
+| --- | --- | --- | --- |
+| Q1 | How big is the catalog, and how does it perform overall? | **KPI cards** | Count of `movie_id`, Sum of `revenue`, Average `vote_average`, Average `roi_percentage` |
+| Q2 | How have movie releases, revenue and ratings trended over time? | **Time-series line chart** | `dim_date[year]` vs. Sum of `revenue` / Average `vote_average` |
+| Q3 | Which movies earn the most revenue and ROI? | **Ranked bar chart (Top 10)** | `dim_movies[title]` vs. `revenue`, `roi_percentage` |
+| Q4 | Which genres perform best? | **Categorical bar chart** | `silver_genres[genre_name]` vs. Sum of `revenue` / Average `vote_average` |
+| Q5 | Do higher budgets translate to higher returns? | **Scatter plot** | `budget` vs. `revenue` |
 
-Every Delta table carries a **transaction log** recording, for each data file, the min/max statistics of every column plus null counts. When a query or MERGE touches the table, Delta applies **data skipping** before reading a single data byte:
+Interactivity: slicers on `dim_date[year]`, `silver_genres[genre_name]` and `original_language`, with cross-filtering between visuals through the star-schema relationships.
 
-1. **Predicate pushdown into the Delta log** — the query's predicates (or the MERGE join keys) are evaluated against the per-file min/max stats in the `_delta_log`; files whose key ranges cannot match are **pruned from the file list entirely**.
-2. **Liquid clustering compounds this** — because `CLUSTER BY` physically sorts rows by the clustering keys, each file's min/max range on `movie_id`/`date_key` is **narrow and non-overlapping**, so a point predicate like `movie_id = 19995` eliminates all but the one relevant file. Under random row order, min/max ranges would span nearly the whole key space and skipping would degenerate.
-3. **Parquet-level pushdown continues** — within surviving files, Parquet row-group statistics and pushdown filters further skip row groups and pages.
+![Business Dashboard](images/powerbi_dashboard_business.png)
 
-Net effect: point lookups and `date_key`-ranged scans on the Gold tables read a tiny fraction of the physical data — this file-skipping stack (Delta log stats → clustering layout → Parquet row groups) is why a 197K-row clustered fact table supports efficient keyed access as it grows.
+*Figure 4.2: Business analytics dashboard page.* *[Add screenshot.]*
 
-## 4.4 Spark UI DAG — Gold MERGE Execution
+## 4.4 Operational / Audit Dashboard Page
 
-**Insert the captured Spark UI DAG screenshot below (the job/stage graph of the `fact_movie_performance` MERGE, showing FileScan → dedup Aggregate → join Exchange/BroadcastHashJoin → update/insert rewrite → WriteFiles):**
+A second report page visualizes the Phase 2/3 audit and error-logging tables:
 
-![Spark UI DAG Diagram](path/to/dag_screenshot.png)
+| Visual | Source | Insight |
+| --- | --- | --- |
+| **Runs by layer and status** (stacked column) | `pipeline_execution_logs` | Success vs. failure counts per layer (Raw-to-Bronze, Bronze-to-Silver, Silver-to-Gold) |
+| **Rows inserted / updated per run** (clustered column) | `pipeline_execution_logs` | Throughput per run; shows the 0-insert idempotent re-runs |
+| **Execution duration per run** (line/bar) | `pipeline_execution_logs` (`end − start`) | Performance trend; Gold run at ~41.33 s |
+| **Failure log table** | `pipeline_execution_logs` filtered to `FAILURE` | Layer, timestamp, `error_message` for the 10 trapped failures |
+| **Quarantine KPI card** | `quarantine_movies` | Row count (currently 0), data-quality health indicator |
 
-> *Placeholder — paste the exported Spark UI DAG image here and update the path above.*
+![Audit Dashboard](images/powerbi_dashboard_audit.png)
+
+*Figure 4.3: Pipeline audit and error-logging dashboard page.* *[Add screenshot.]*
 
 ---
 
-# 5. FinOps Evaluation & Enterprise Scaling Analysis
+# 5. Spark UI & DAG Analysis (Gold Layer Fact Table Aggregation)
 
-## 5.1 Compute Configuration
+## 5.1 Execution Mechanics of the Gold-Layer MERGE
+
+The Silver-to-Gold stage executes three sequential `MERGE INTO` operations. Under the Spark execution model, each `MERGE` compiles to a job with a characteristic DAG:
+
+1. **Source scan**: `FileScan` over the single-file `silver_movies` Delta table (~35 MB), applying column pruning (only the 7–11 columns each target needs are read).
+2. **Deduplication**: `dropDuplicates(["movie_id"])` / `distinct()` stages introduce `Aggregate` nodes with hash-based partial-to-final aggregation exchanges.
+3. **Target join**: the source DataFrame is joined against the Delta target's files on the merge condition (e.g. `target.movie_id = source.movie_id AND target.date_key = source.date_key`), producing matched/unmatched row sets.
+4. **Rewrite phase**: matched rows flow to an update/`WriteFiles` branch, unmatched to an insert branch; Delta rewrites only the affected files (with `CLUSTER BY` keys aligned to the merge keys, data changes localize to the same physical files).
+5. **Commit**: the transaction commits to the Delta log (`operation = MERGE`), with `operationMetrics` captured by `get_merge_metrics()` via `DESCRIBE HISTORY` and written to the audit log.
+
+Because the fact table's clustering keys `(movie_id, date_key)` **are** its MERGE join keys, the join predicate aligns with the physical layout. The join-to-touched-files mapping is near-optimal, which is a large part of why the whole three-table Gold refresh finished in ~41 seconds.
+
+## 5.2 Broadcast Hash Joins vs. Shuffle Hash Joins (Foreign-Key Lookups)
+
+The Gold transformation performs foreign-key lookups on `movie_id` and `date_key`. Spark's Catalyst optimizer chooses between two join physical strategies:
+
+**Broadcast Hash Join (BHJ)** is chosen when one side fits in memory under `spark.sql.autoBroadcastJoinThreshold` (default 10 MB):
+
+* The small side is collected to the driver, broadcast as a `BroadcastExchange` hash table to every executor, and the big side is scanned **once, with no shuffle at all**. Each executor probes the local hash copy per row.
+* **`dim_date` (8,142 rows, ~60 KB)** is a textbook broadcast candidate: its lookup to resolve `release_date → date_key` runs as a Broadcast Hash Join, costing one tiny broadcast and zero network shuffle of the ~198K-row source.
+
+**Shuffle Hash Join / Sort-Merge Join (SMJ)** is chosen when both sides exceed the broadcast threshold:
+
+* Both sides are repartitioned (`Exchange hashpartitioning(...)` on the join key) so matching rows land in the same task, then hashed or sort-merged per partition.
+* **`dim_movies` (~27 MB, 197,871 rows)** exceeds the 10 MB default threshold, so its joins run through a shuffle/sort-merge path. With **Adaptive Query Execution (AQE)** enabled (serverless default), Spark can at runtime convert a planned sort-merge join into a shuffled hash join or even re-plan a broadcast if the actual, statistics-corrected side size turns out small enough.
+
+**Why this matters for this pipeline:** dimensional schemas are the ideal broadcast workload. The tiny `dim_date` side eliminates the most expensive possible operation (shuffling the fact-grain source) from every `date_key` lookup, and AQE ensures the optimizer keeps making the right call as table sizes evolve. The broadcast decision is visible directly in the Spark UI DAG (a `BroadcastExchange` node feeding a `BroadcastHashJoin` operator) versus a pair of `Exchange` nodes feeding a `SortMergeJoin`.
+
+## 5.3 Delta Log Predicate Pushdown & File Skipping
+
+Every Delta table carries a **transaction log** recording, for each data file, the min/max statistics of every column plus null counts. When a query or MERGE touches the table, Delta applies **data skipping** before reading a single data byte:
+
+1. **Predicate pushdown into the Delta log**: the query's predicates (or the MERGE join keys) are evaluated against the per-file min/max stats in the `_delta_log`; files whose key ranges cannot match are **pruned from the file list entirely**.
+2. **Liquid clustering compounds this**: because `CLUSTER BY` physically sorts rows by the clustering keys, each file's min/max range on `movie_id`/`date_key` is **narrow and non-overlapping**, so a point predicate like `movie_id = 19995` eliminates all but the one relevant file. Under random row order, min/max ranges would span nearly the whole key space and skipping would degenerate.
+3. **Parquet-level pushdown continues**: within surviving files, Parquet row-group statistics and pushdown filters further skip row groups and pages.
+
+Net effect: point lookups and `date_key`-ranged scans on the Gold tables read a tiny fraction of the physical data. This file-skipping stack (Delta log stats → clustering layout → Parquet row groups) is why a 197K-row clustered fact table supports efficient keyed access as it grows.
+
+## 5.4 Spark UI DAG: Gold Fact Table MERGE (Screenshot & Analysis)
+
+The screenshot below is the Spark UI query profile of the `MERGE INTO workspace.tmdb.fact_movie_performance` statement, executed on Databricks Serverless compute. The graph shows execution 3 of 5 of that statement (964 ms), and the Details panel on the left shows the statement-level metrics. The run is a re-run of the Gold notebook on 2026-10-25 (same logic as the 2026-10-21 run reported in Section 3).
+
+![Spark UI DAG Diagram](images/spark_dag_gold_fact.png)
+
+*Figure 5.1: Spark UI query profile (execution 3 of 5) for the Gold fact table MERGE (`fact_movie_performance`), Databricks Serverless compute.*
+
+**Statement-level metrics (from the Details panel):**
+
+| Metric | Value |
+| --- | --- |
+| Wall-clock duration | 5.635 s |
+| Rows read | 989,220 |
+| Rows written | 197,844 |
+| Bytes read / written | 6.59 MB / 2.41 MB |
+| Files read / written | 11 / 4 |
+
+**How Spark executed it (reading the DAG bottom-up):**
+
+1. **RDD Scan → Row To Columnar → Filter**: the source side of the MERGE is an in-memory DataFrame. Spark converts its rows to columnar batches and applies a filter to the source rows (~197.84K rows).
+2. **Shuffle**: the source rows are redistributed across the cluster ahead of the join. This is a data-movement step in the plan.
+3. **Scan Table**: the target Delta table (`fact_movie_performance`) is scanned (~197.84K rows).
+4. **Inner Join**: source and target are joined on the MERGE condition, identifying which target rows match. About 197.84K rows flow out of the join.
+5. **Grouping Aggregate → Shuffle → Grouping Aggregate**: a two-stage aggregation (partial, shuffle, final) reduces the join output to a single row. This is consistent with Delta's MERGE bookkeeping of which target files are touched.
+6. **Serialize / Map Partitions / Deserialize → Result Query Stage**: the remaining operators pass that one-row result back to the driver.
+
+This graph ends in a result stage rather than a write operator, so the file rewrite and commit most likely occur in other executions of the same statement.
+
+**Key observations:**
+
+* **Shuffles do appear in this plan**: one on the source side before the join and one inside the final aggregate. For a ~198K-row table they are cheap, and the full statement completes in 5.6 s.
+* **Rows read (989,220) equal exactly 5 × rows written (197,844)**, which suggests the data is scanned repeatedly across the statement's 5 executions. This is normal MERGE behaviour (match first, then rewrite).
+* **No file pruning in this run**: the Details panel reports 0% skipped for both bytes and files read (11 files). At ~6.6 MB total, the table is too small for data skipping to matter. The benefit of Liquid Clustering will show as the table grows (see Section 5.3).
+* **Time spent** colouring shows the in-memory **RDD Scan** as the most expensive operator in this execution; the Delta **Scan Table** on the target costs less.
+* Serverless compute exposes only this operator-level profile, not the full physical plan, so the join strategy (broadcast vs. sort-merge) is not labelled. The general trade-offs are covered in Section 5.2.
+* This 5.6 s figure covers the fact-table MERGE only, so it is not directly comparable to the ~41 s total for the three-table Gold run in Section 3.
+# 6. FinOps Evaluation & Enterprise Scaling Analysis
+
+## 6.1 Compute Configuration
 
 | Attribute | Value |
 | --- | --- |
@@ -413,24 +538,27 @@ Net effect: point lookups and `date_key`-ranged scans on the Gold tables read a 
 
 The serverless profile is a FinOps decision in itself: no idle all-purpose clusters billing in the background, no cluster-start time charged to the run, and compute scales transparently if the workload grows.
 
-## 5.2 Runtime Efficiency
+## 6.2 Runtime Efficiency
 
-* **Full Gold refresh (3 tables, 403,857 row-level operations): ~41.33 seconds** — including all three MERGEs, the `OPTIMIZE` passes on `fact_movie_performance` and `dim_movies`, and the audit-log write.
+* **Full Gold refresh (3 tables, 403,857 row-level operations): ~41.33 seconds**, including all three MERGEs, the `OPTIMIZE` passes on `fact_movie_performance` and `dim_movies`, and the audit-log write.
 * Raw-to-Bronze ingestion: **~9–31 s** per batch; Bronze-to-Silver: **~18–29 s** per successful run.
-* End-to-end, the full medallion pipeline from raw JSON to star schema completes on the order of **~1–2 minutes** — serverless cold starts are negligible and every stage is small-file, statistics-driven work.
+* End-to-end, the full medallion pipeline from raw JSON to star schema completes on the order of **~1–2 minutes**. Serverless cold starts are negligible and every stage is small-file, statistics-driven work.
+* **Typical incremental run:** a daily incremental load (trending + changed movies) processes only the changed IDs, so it is a small fraction of the full-load volumes above. The measured Gold run (41.33 s) is a conservative upper bound because it re-reads all Silver rows. *[OPTIONAL: run `00_master_pipeline` with `load_type = incremental` once and insert its measured per-stage durations from `pipeline_execution_logs` here.]*
 
-## 5.3 Estimated DBU Consumption per Run
+## 6.3 Estimated DBU Consumption per Run
 
 | Measure | Estimate |
 | --- | --- |
 | Active compute time per Gold run | ~0.0115 h (41.33 s) |
 | **DBUs consumed per Gold run** | **~0.02 DBUs** |
 | **Cost per Gold run** | **~$0.03 – $0.08 USD** (DBU rate-band dependent) |
-| Full pipeline (all 3 stages) per run | Roughly a multiple of the Gold-only figure — still just cents |
+| Full pipeline (all 3 stages) per run | Roughly a multiple of the Gold-only figure, still just cents |
 
-At this scale the marginal cost of a pipeline run is effectively **rounding error** — the FinOps story is not "this run is cheap" but "this run is cheap *and* the architecture keeps it cheap as it scales" (clustering keeps queries pruned, MERGE keeps rework bounded, and serverless keeps idle cost at zero).
+*These are estimates derived from measured runtime and an assumed DBU rate band, not billed figures. Actual billed usage can be verified in `system.billing.usage`.*
 
-## 5.4 Enterprise Annual Scaling Projection — Hourly Schedule (8,760 runs/year)
+At this scale the marginal cost of a pipeline run is effectively **rounding error**. The FinOps story is not "this run is cheap" but "this run is cheap *and* the architecture keeps it cheap as it scales" (clustering keeps queries pruned, MERGE keeps rework bounded, and serverless keeps idle cost at zero).
+
+## 6.4 Enterprise Annual Scaling Projection: Hourly Schedule (8,760 runs/year)
 
 Projecting the Gold refresh to a production **hourly** cadence (24 × 365 = **8,760 runs/year**):
 
@@ -442,9 +570,9 @@ Projecting the Gold refresh to a production **hourly** cadence (24 × 365 = **8,
 | Cost (high band) | ~$0.08 | **~$701 USD/year** |
 | Active compute time | 41.33 s | ~100.5 hours/year of actual processing |
 
-**Annual cost of an hourly, enterprise-grade Gold refresh: on the order of $300–$700 USD/year.** For comparison, a single mid-size always-on provisioned cluster would cost that much in days. As data grows 10–100×, MERGE duration and thus DBUs scale roughly linearly with *changed rows* (not total table size), so even a 100× data increase projects to a four-to-five-figure annual run cost — still dramatically cheaper than provisioned infrastructure, thanks to per-second serverless billing and clustering-driven file pruning.
+**Annual cost of an hourly, enterprise-grade Gold refresh: on the order of $300–$700 USD/year.** For comparison, a single mid-size always-on provisioned cluster would cost that much in days. As data grows 10–100×, MERGE duration and thus DBUs scale roughly linearly with *changed rows* (not total table size), so even a 100× data increase projects to a four-to-five-figure annual run cost, still dramatically cheaper than provisioned infrastructure, thanks to per-second serverless billing and clustering-driven file pruning.
 
-## 5.5 Concrete Cost-Optimization Strategies
+## 6.5 Concrete Cost-Optimization Strategies
 
 | # | Strategy | Implementation | Expected Impact |
 | --- | --- | --- | --- |
@@ -454,12 +582,25 @@ Projecting the Gold refresh to a production **hourly** cadence (24 × 365 = **8,
 
 Additional FinOps guardrails worth institutionalizing:
 
-* **Per-layer DBU attribution** — tag each stage's warehouse/cluster so `system.billing.usage` can attribute DBUs to Raw-to-Bronze vs. Silver vs. Gold for chargeback dashboards.
-* **Budget alerts** — an alert on anomalous daily DBU spend (e.g. > 3× trailing-7-day average) catches runaway runs early — exactly the failure modes the audit log already captures functionally.
-* **Incremental Gold loads** — Gold currently re-reads all Silver rows per run (full-load by design); switching the hourly cadence to `load_type = incremental` (batch-scoped MERGEs) would cut the 41 s run and its DBUs proportionally to the daily change rate — likely 95%+ savings for a slowly-changing movie catalog.
+* **Per-layer DBU attribution**: tag each stage's warehouse/cluster so `system.billing.usage` can attribute DBUs to Raw-to-Bronze vs. Silver vs. Gold for chargeback dashboards.
+* **Budget alerts**: an alert on anomalous daily DBU spend (e.g. > 3× trailing-7-day average) catches runaway runs early, which is exactly the failure mode the audit log already captures functionally.
+* **Incremental Gold loads**: Gold currently re-reads all Silver rows per run (full-load by design); switching the hourly cadence to batch-scoped MERGEs would cut the 41 s run and its DBUs proportionally to the daily change rate, likely 95%+ savings for a slowly-changing movie catalog.
+* **BI refresh cost**: scheduling Power BI Import refreshes only after the pipeline completes (rather than DirectQuery on every interaction) keeps the SQL warehouse awake only for the refresh window.
+
+---
+
+# 7. Deliverables Map
+
+| Deliverable | Location |
+| --- | --- |
+| GitHub repository (PySpark notebooks) | *[insert repository URL]* |
+| Power BI file | *[`.pbix` file name / published link]* |
+| Final report | This document (PDF) |
+
+Repository contents: `00_master_pipeline`, `bronze/bronze_injestion`, `silver/silver_injestion`, `gold/gold_transformation`, `log/00_audit_logging`, `staging/` sample payloads, and `data_retrieval_scripts/` (TMDB extraction).
 
 ---
 
 ## Conclusion
 
-The TMDB Movie Analytics Lakehouse is architecturally sound and production-proven: **immutable Bronze replayability**, **PERMISSIVE parsing with quarantine containment**, **idempotent MERGE loading verified at 0 duplicate inserts**, a **liquid-clustered Gold star schema with clean PK/FK integrity** (197,871 dimension movies / 8,142 dates / 197,844 facts, reconciling exactly to Silver minus 27 un-datable rows), **complete audit coverage of 16 runs including 10 trapped development failures**, and a **~41-second, ~$0.03–$0.08 Gold refresh** that scales to an hourly enterprise cadence for a few hundred dollars a year. Every number in this report was verified live against the workspace on 2026-10-21.
+The TMDB Movie Analytics Lakehouse is architecturally sound and production-proven: **immutable Bronze replayability**, **PERMISSIVE parsing with quarantine containment**, **idempotent MERGE loading verified at 0 duplicate inserts**, a **liquid-clustered Gold star schema with clean PK/FK integrity** (197,871 dimension movies / 8,142 dates / 197,844 facts, reconciling exactly to Silver minus 27 un-datable rows), a **Power BI semantic model that mirrors the star schema** with both business and pipeline-audit dashboards, **complete audit coverage of 16 runs including 10 trapped development failures**, and a **~41-second, ~$0.03–$0.08 Gold refresh** that scales to an hourly enterprise cadence for a few hundred dollars a year. Pipeline metrics in this report were verified live against the workspace on 2026-10-21; the Power BI sections describe the dashboard design and must be matched to the final `.pbix`.
